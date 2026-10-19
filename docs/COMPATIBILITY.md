@@ -642,3 +642,12 @@ The Android device model, OS version and individual gameplay scenarios were
 not recorded. This general smoke report does not certify each issue item,
 multiplayer, long sessions or haptic behavior. Representative legacy texture
 packs, other fonts and macOS/Linux/Steam Deck behavior remain separate checks.
+
+## Audio menu development check (2026-10-19)
+
+Windows x64, source commit `e7b96c5` (`sound-settings`, based on `c40b979`):
+
+- All 73 registered CTest checks passed across a full run and a targeted rerun after correcting one expected test rounding value. This includes the new synthetic game audio tests and the real renderer/UI menu tests in normal and compatibility configurations.
+- A bounded game run with isolated data loaded all 355 existing overlays. The game audio diagnostic reported BGM/SFX at 7/7. Changing BGM through the new Audio menu produced BGM 6/7 with SFX still 7/7 after resuming. The Master Volume, BGM Volume and SFX Volume menu captures were inspected.
+- The user also confirmed that the controls work and both volume levels change during gameplay.
+- Original Options screen round trips, save/restart persistence of these levels, and other platforms were not checked in this pass. No coverage percentage was measured on Windows.

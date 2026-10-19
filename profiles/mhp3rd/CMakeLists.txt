@@ -255,6 +255,7 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_data_bin.cpp
     host/mods/mhp3rd_mod_format.cpp
     host/mods/mhp3rd_mods.cpp
+    host/game/audio_settings.cpp
     host/game/guest_ram.cpp
     host/game/game_data.cpp
     host/game/equipment_models.cpp
@@ -740,6 +741,14 @@ target_include_directories(mhp3rd_equipment_models_tests PRIVATE "${MHP3RD_PROFI
 set_target_properties(mhp3rd_equipment_models_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_equipment_models_tests COMMAND mhp3rd_equipment_models_tests)
+endif()
+
+# Original game sound options and live music gain on synthetic guest memory.
+add_executable(mhp3rd_audio_settings_tests tests/audio_settings_tests.cpp host/game/audio_settings.cpp)
+target_include_directories(mhp3rd_audio_settings_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_audio_settings_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_audio_settings_tests COMMAND mhp3rd_audio_settings_tests)
 endif()
 
 # Renderer helpers that need no GPU.

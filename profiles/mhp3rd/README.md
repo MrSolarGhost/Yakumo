@@ -419,13 +419,15 @@ Esc, or L3+R3 on a gamepad, opens Yakumo's menu over the game; the same again, b
 
 The menu opens where it was last closed: the same page, scrolled as it was, with the same row focused. The page is also kept for the next start (`ui.menu_tab` in `settings.ini`); the scroll position and the row only for the session. When that row is not there any more, the page opens at its top.
 
+BGM Volume and SFX Volume edit the same eight levels as the original game's Options menu; changing either menu is reflected in the other. They become available once the game initializes its sound settings. BGM changes also apply to the current music stream. Save through the game to persist these levels; they are not separate `settings.ini` overrides. Master Volume continues to control the entire host output independently. Restore Audio Defaults also returns available game sound levels to 7.
+
 By default the game is paused while the menu is open: no guest code runs, emulated time stands still, the audio device stops, and the last frame stays behind the menu, dimmed. On resume the kernel's clock picks up from real time again, so the game neither races to make up the pause nor counts it in the `[perf]` statistics.
 
 Two settings in the System section change that. With *Pause the Game When the Menu Opens* off, the game keeps running behind the menu: it keeps drawing frames at its own pace, the sound keeps playing and its clock keeps running, and the menu is drawn over each frame. During ad hoc play (in a gathering hall, joining one, or hosting a session) the game keeps running behind the menu unless *Pause During Multiplayer* is on, whatever the first setting says, because a paused game stops answering the other players and can drop a quest; this one is off by default. The menu's header says which applies: *Paused* or *Running*. Either way, input goes to the menu only, so moving through it never moves the hunter, and buttons still held when it closes reach the game only after they are released.
 
 The menu follows the game's confirm convention: with the default layout the right face button (○ on a PlayStation pad, B on a Steam Deck) selects and the bottom one goes back, as in the game; with *Confirm Button* set to the bottom button, both swap. The footer shows the buttons of the pad in use (PlayStation shapes or letters) or the keys, and a line explaining the focused setting. L1/R1 (LB/RB), or Q/W on the keyboard, switch between the sections. Left and right change a value; confirm steps it forward.
 
-Every change applies at once and is saved to `settings.ini` in the per-user directory, next to the installer's `disc_image`. A setting whose environment variable is set is decided by that variable for the run: the menu shows it greyed with *Set by MHP3RD_…* and leaves the file's value alone. So the order is: environment variable, then `settings.ini`, then the default.
+Host settings apply at once and are saved to `settings.ini` in the per-user directory, next to the installer's `disc_image`. A setting whose environment variable is set is decided by that variable for the run: the menu shows it greyed with *Set by MHP3RD_…* and leaves the file's value alone. So the order is: environment variable, then `settings.ini`, then the default.
 
 The Android app starts from other defaults where a phone differs, with the same keys and values: `video.aspect` is `fill` (a phone is wider than the PSP), `video.fullscreen` is on (there is no window) and `input.mouse` is off (a phone has no mouse to capture). Everything else starts as in the table. On Android, *Analog Camera* alone decides whether a finger drag turns the camera: *Camera Stick* is about a physical stick there.
 
@@ -450,7 +452,9 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Video | Font | `text.font` | `MHP3RD_FONT` | Default (a Japanese system font), or an installed font; see [Game text](#game-text) |
 | Video | Weight | `text.weight` | | Regular, bold (default) or heavy: thickens the game's text by 0–2 pixel columns |
 | Video | Sharp Text | `text.crisp` | `MHP3RD_CRISP_TEXT` | Off (default) or on: above ×1 the game's text is drawn again at the internal resolution. See [Sharper text and 2D textures](#sharper-text-and-2d-textures) |
-| Audio | Volume | `audio.volume` | | 0–100% |
+| Audio | Master Volume | `audio.volume` | | 0–100%; overall host output gain |
+| Audio | BGM Volume | Game save | | 0–7; the original game's music level |
+| Audio | SFX Volume | Game save | | 0–7; the original game's sound effects level |
 | Audio | Mute | `audio.mute` | | |
 | Audio | Mute in Background | `audio.background_mute` | | Off (default) or on: silence the game while it runs in the background |
 | Controls | Gamepad in Background | `input.background_gamepad` | | Off (default) or on: read the controller while unfocused; other running instances may receive the same input. Keyboard and mouse stay focused |
@@ -1203,6 +1207,7 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | --- | --- |
 | `MHP3RD_STRICT_HLE=1` | Do not bind logging stubs; stop at the first unimplemented import |
 | `MHP3RD_TRACE_KERNEL=1`, `MHP3RD_TRACE_IO=1` | Trace thread and file activity |
+| `MHP3RD_TRACE_GAME_AUDIO=1` | Log changes to the original BGM/SFX levels at frame boundaries |
 | `MHP3RD_TRACE_LOAD=1` | Four `[loadtrace]` lines a second: real and emulated time, flips, disc and memory stick reads, the loudest audio sample, time spent holding the game to real time, and which guest threads had the CPU. What [Fast loading](#fast-loading) was measured with |
 | `MHP3RD_TRACE_MODS=1` | What the [mods](#mods) change at start and after each change, every `DATA.BIN` read they serve, and each write made after an overlay loads |
 | `MHP3RD_TRACE_DATA_BIN=1` | While a mod is on, the id of every `DATA.BIN` file the game reads (`[mods] data 034B (32768 bytes)`): how to find the file behind a model on screen |

@@ -1,5 +1,5 @@
 // The in-game menu: Esc, or L3+R3 on a gamepad. It holds every player setting;
-// each change applies at once and is saved to settings.ini straight away. It
+// host settings are saved to settings.ini; game audio levels use the game save. It
 // pauses the game, or, as the settings say, stays over the running game.
 
 #include "ui/ui.hpp"
@@ -28,6 +28,7 @@
 #include "adhoc/session.hpp"
 #include "audio/audio_sink.hpp"
 #include "camera/free_camera.hpp"
+#include "game/audio_settings.hpp"
 #include "gpu/screenshot.hpp"
 #include "gpu/game_hud.hpp"
 #include "gpu/vulkan_renderer.hpp"
@@ -620,12 +621,27 @@ void Menu::audio() {
     };
     section("Output:");
     int volume = static_cast<int>(s.volume);
-    if (slider_row(
-            "Volume", volume, 0, 100, 5, "%d%%", locked("audio.volume", "Loudness of everything the game plays."))) {
+    if (slider_row("Master Volume", volume, 0, 100, 5, "%d%%",
+            locked("audio.volume", "Loudness of everything the game plays."))) {
         s.volume = static_cast<std::uint32_t>(volume);
         sink.refresh_settings();
         settings::save();
     }
+    std::optional<game::sound::Levels> levels;
+    game::read([&](const game::Ram &ram) { levels = game::sound::read(ram); });
+    const auto game_volume = [&](const char *label, game::sound::Channel channel, int value) {
+        RowOptions options = locked("",
+            "The game's own volume level. Also adjustable in the game's Options menu. "
+            "Save in the game to keep this setting.");
+        if (!levels) {
+            options.disabled = true;
+            options.note = "Available after the game initializes its sound settings";
+        }
+        if (slider_row(label, value, 0, game::sound::kMaxLevel, 1, "%d / 7", options))
+            game::edit([&](game::Ram &ram) { (void)game::sound::set(ram, channel, value); });
+    };
+    game_volume("BGM Volume", game::sound::Channel::Bgm, levels ? levels->bgm : 0);
+    game_volume("SFX Volume", game::sound::Channel::Sfx, levels ? levels->sfx : 0);
     if (toggle_row("Mute", s.mute, locked("audio.mute", "Silence the game without losing the volume setting."))) {
         s.mute = !s.mute;
         sink.refresh_settings();
@@ -640,10 +656,14 @@ void Menu::audio() {
     info_row(
         "Device", device ? (paused_ ? "44100 Hz stereo, paused while this menu is open" : "44100 Hz stereo") : "None");
     section("Reset to Defaults:");
-    if (button_row("Restore Audio Defaults", {!device, {}, "Full volume, not muted."})) {
+    if (button_row("Restore Audio Defaults", {!device, {}, "Full master, BGM and SFX volume, not muted."})) {
         s.volume = settings::defaults().volume;
         s.mute = settings::defaults().mute;
         s.background_mute = settings::defaults().background_mute;
+        game::edit([](game::Ram &ram) {
+            (void)game::sound::set(ram, game::sound::Channel::Bgm, game::sound::kMaxLevel);
+            (void)game::sound::set(ram, game::sound::Channel::Sfx, game::sound::kMaxLevel);
+        });
         sink.refresh_settings();
         settings::save();
     }

@@ -84,5 +84,7 @@ void attach(psprecomp::Runtime &runtime);
 // Calls `reader` with the game's memory; false (and no call) before the game
 // has run a frame.
 bool read(const std::function<void(const Ram &)> &reader);
+// Same frame-boundary contract as read(), for explicit menu edits.
+bool edit(const std::function<void(Ram &)> &writer);
 
 } // namespace mhp3rd::game
