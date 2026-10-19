@@ -621,3 +621,24 @@ from the table. Normal player/release installations, saves and launchers were
 not replaced. Moving combat, audio performance, multiplayer, long thermal
 sessions, other GPUs and the independent historical Android surface-loss
 startup issue remain outside this validation.
+
+## Issue #320 development checks (2026-10-19)
+
+Tested source: `a2cfb175c297` on `small-fixes`. The Windows and Android builds
+were made from the same C++ working tree before committing. Rebasing onto newer
+main CI/packaging commits left all tested implementation files unchanged.
+
+- Windows: Release application build and all 72 CTest cases passed, including
+  texture-pack, font, input, touch-menu and renderer/UI contracts. Font spacing
+  comparisons were inspected in game; synthetic touch-menu captures were also
+  inspected.
+- Android: an arm64-v8a Release APK was built with all 355 compatible prebuilt
+  overlays. Signature, ZIP integrity/alignment, Android 10 imports, ARM64 and
+  16 KiB ELF LOAD alignment checks passed. The reporter manually tested this
+  APK and reported it working. Its SHA-256 is
+  `bec73f13fc981338fa6c608e19ea804641dd25d7243351abcc7867b6e4627ab7`.
+
+The Android device model, OS version and individual gameplay scenarios were
+not recorded. This general smoke report does not certify each issue item,
+multiplayer, long sessions or haptic behavior. Representative legacy texture
+packs, other fonts and macOS/Linux/Steam Deck behavior remain separate checks.
