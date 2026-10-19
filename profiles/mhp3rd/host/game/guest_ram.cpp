@@ -30,4 +30,12 @@ bool read(const std::function<void(const Ram &)> &reader) {
     return true;
 }
 
+bool edit(const std::function<void(Ram &)> &writer) {
+    psprecomp::Runtime *runtime = attached();
+    if (runtime == nullptr) return false;
+    GuestRam ram(runtime->memory());
+    writer(ram);
+    return true;
+}
+
 } // namespace mhp3rd::game

@@ -9,6 +9,7 @@
 
 #include "overlays.hpp"
 #include "game/guest_ram.hpp"
+#include "game/audio_settings.hpp"
 #include "game/layered_armor.hpp"
 #include "platform/utf8_path.hpp"
 
@@ -433,6 +434,7 @@ void present_frame(Runtime &rt) {
     revalidate_overlays(rt);
     // The menu, drawn below, reads the game's memory between frames.
     game::attach(rt);
+    game::sound::trace(game::GuestRam(rt.memory()));
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);
     // The game's text, in the player's language when one is chosen: applied

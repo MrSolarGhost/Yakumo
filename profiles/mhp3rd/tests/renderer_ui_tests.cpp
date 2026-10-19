@@ -8,6 +8,7 @@
 #include "game/equipment_models.hpp"
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
+#include "game/audio_settings.hpp"
 #include "game/layered_armor.hpp"
 #include "ui/layered_armor_screen.hpp"
 #include "ui/font_menu.hpp"
@@ -4308,7 +4309,7 @@ void touch_menu_footer_contracts(gpu::VulkanRenderer &renderer, const std::files
     expect(!ui::menu_over_game(), "keyboard Escape still closes a menu reopened after touch");
 }
 
-void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false) {
+void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, bool camera_overrides = false) {
     // These contracts navigate with keys and virtual pads; unrelated desktop cursor motion must not steal focus.
     auto &menu_io = ImGui::GetIO();
     const auto saved_config_flags = menu_io.ConfigFlags;
@@ -4555,9 +4556,41 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
     settings::current().volume = 50;
     settings::current().mute = false;
     page();
-    change_video("Volume", ImGuiKey_RightArrow);
+    // No game has initialized its sound options in this public fixture yet.
+    change_video("BGM Volume", ImGuiKey_RightArrow);
+    change_video("SFX Volume", ImGuiKey_RightArrow);
+    auto &sound_memory = runtime.memory();
+    const std::array<std::uint32_t, 6> sound_slots{
+        0x088C637Cu, 0x088C6390u, 0x0896CE50u, 0x08AB3640u, 0x09FBEB8Cu, 0x09FC87D0u};
+    std::array<std::uint32_t, 6> saved_sound_words{};
+    for (std::size_t i = 0; i < sound_slots.size(); ++i) saved_sound_words[i] = sound_memory.load32(sound_slots[i]);
+    sound_memory.store32(0x088C637Cu, 0xAC857D50u);
+    sound_memory.store32(0x088C6390u, 0xAC857D54u);
+    sound_memory.store32(0x0896CE50u, 0x40E00000u);
+    sound_memory.store32(0x08AB3640u, 0x08C00000u);
+    sound_memory.store32(0x09FBEB8Cu, 0x09000000u);
+    sound_memory.store32(0x09FC87D0u, 0u);
+    sound_memory.store8(0x08C5FBD6u, 4u);
+    sound_memory.store8(0x08C5FBD7u, 6u);
+    sound_memory.store32(0x09827D54u, 4u);
+    sound_memory.store32(0x09827D50u, 6u);
+    game::attach(runtime);
+    change_video("BGM Volume", ImGuiKey_RightArrow);
+    expect(sound_memory.load8(0x08C5FBD6u) == 5 && sound_memory.load32(0x09827D54u) == 5 &&
+            sound_memory.load8(0x08C5FBD7u) == 6,
+        "BGM menu advances the real game option and engine by one level independently of SFX");
+    change_video("SFX Volume", ImGuiKey_LeftArrow);
+    expect(sound_memory.load8(0x08C5FBD7u) == 5 && sound_memory.load32(0x09827D50u) == 5 &&
+            settings::current().volume == 50,
+        "SFX menu edits the native effect level independently of master output gain");
+    sound_memory.store8(0x08C5FBD6u, 0u);
+    change_video("BGM Volume", ImGuiKey_LeftArrow);
+    expect(sound_memory.load8(0x08C5FBD6u) == 0, "BGM menu reflects original-game edits and clamps at silence");
+    change_video("BGM Volume", ImGuiKey_RightArrow);
+    expect(sound_memory.load8(0x08C5FBD6u) == 1, "BGM menu reads changed game state instead of a cached host override");
+    change_video("Master Volume", ImGuiKey_RightArrow);
     expect(settings::current().volume == 55, "audio menu volume steps by exactly five percent");
-    change_video("Volume", ImGuiKey_LeftArrow);
+    change_video("Master Volume", ImGuiKey_LeftArrow);
     expect(settings::current().volume == 50, "audio menu volume reverse step restores gain setting");
     change_video("Mute", ImGuiKey_RightArrow);
     expect(settings::current().mute, "audio menu mute enables zero gain");
@@ -4573,6 +4606,10 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
             settings::current().mute == settings::defaults().mute &&
             settings::current().background_mute == settings::defaults().background_mute,
         "audio defaults restore shipped gain and mute state");
+    expect(sound_memory.load8(0x08C5FBD6u) == 7 && sound_memory.load8(0x08C5FBD7u) == 7 &&
+            sound_memory.load32(0x09827D54u) == 7 && sound_memory.load32(0x09827D50u) == 7,
+        "audio defaults restore both native game levels as well as master gain");
+    for (std::size_t i = 0; i < sound_slots.size(); ++i) sound_memory.store32(sound_slots[i], saved_sound_words[i]);
     settings::current().volume = volume;
     settings::current().mute = saved_mute;
     page();
@@ -5416,7 +5453,7 @@ void terminal_audio_menu_contracts(gpu::VulkanRenderer &renderer) {
         for (auto *window : ImGui::GetCurrentContext()->Windows)
             if (std::string_view(window->Name).find("##menu/content") != std::string_view::npos) {
                 ImGui::FocusWindow(window);
-                ImGui::SetFocusID(window->GetID("Volume"), window);
+                ImGui::SetFocusID(window->GetID("Master Volume"), window);
                 ImGui::SetNavCursorVisible(true);
                 ImGui::SetScrollY(window, 0);
             }
@@ -5854,7 +5891,7 @@ int run_contracts(int scripts) {
     if (scripts == 6) {
         expect(ui::Layer::get().attach(renderer), "QoL override fixture attaches the real UI layer");
         if (ImGui::GetCurrentContext() == nullptr) return 1;
-        menu_contracts(renderer, true);
+        menu_contracts(renderer, fixture.runtime, true);
         renderer.shutdown();
         std::filesystem::remove_all(sandbox);
         std::cout << (failures ? "FAIL" : "PASS") << ": QoL reset overrides (" << failures << " failures)\n";
@@ -5994,7 +6031,7 @@ int run_contracts(int scripts) {
     focused_widget_contracts(renderer);
     font_menu_contracts(renderer, sandbox);
     tab_drag_contracts(renderer);
-    menu_contracts(renderer);
+    menu_contracts(renderer, fixture.runtime);
     setup_screen_contracts(renderer, sandbox);
     texture_pack_screen_contracts(renderer, sandbox);
     translation_screen_contracts(renderer, sandbox);
