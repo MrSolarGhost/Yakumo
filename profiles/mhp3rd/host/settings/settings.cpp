@@ -581,7 +581,9 @@ const std::vector<Field> &all_fields() {
             list.push_back(Field{key.c_str(), nullptr,
                 [i](Settings &s, const std::string &t) {
                     if (!input::touch::parse(t, s.touch_action.elements[i])) return false;
-                    if (i == static_cast<std::size_t>(input::touch::Element::R3))
+                    if (i == static_cast<std::size_t>(input::touch::Element::R3) ||
+                        i == static_cast<std::size_t>(input::touch::Element::DPad) ||
+                        i == static_cast<std::size_t>(input::touch::Element::DpadToggle))
                         s.touch_action.elements[i].buttons = 0u;
                     return true;
                 },

@@ -37,6 +37,8 @@ enum class Element : std::uint8_t {
     Select,
     Swipe, // the swipe area: left and right swipes press D-pad Left and Right
     R3,    // virtual right-stick button, using the player's gamepad assignment
+    DPad,
+    DpadToggle,
     Count
 };
 inline constexpr std::size_t kElements = static_cast<std::size_t>(Element::Count);
@@ -150,13 +152,15 @@ public:
     [[nodiscard]] Point take_camera_drag();
     // The Pause button was tapped since the last take.
     [[nodiscard]] bool take_menu();
+    [[nodiscard]] bool take_dpad_toggle();
+    [[nodiscard]] std::uint16_t dpad_held() const;
     // Presses that should give haptic feedback since the last take.
     [[nodiscard]] int take_haptics();
     // The swipe last pressed and when, for drawing: -1 left, 1 right, 0 none.
     [[nodiscard]] int swipe_shown(std::uint64_t ms) const;
 
 private:
-    enum class Role : std::uint8_t { None, Stick, Button, Camera, Swipe };
+    enum class Role : std::uint8_t { None, Stick, Button, Camera, Swipe, DPad };
     struct Finger {
         std::uint64_t id{};
         bool used{};
@@ -184,6 +188,7 @@ private:
     Point stick_thumb_{};
     Point camera_drag_{};
     bool menu_tapped_{};
+    bool dpad_toggled_{};
     int haptics_{};
     std::uint64_t swipe_until_[2]{}; // left, right
 };

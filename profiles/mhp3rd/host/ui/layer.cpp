@@ -268,6 +268,7 @@ std::optional<input::Chord> Layer::take_captured_binding() {
 
 bool Layer::handle_event(const SDL_Event &event) {
     const Clock::time_point now = Clock::now();
+    if (event.type == SDL_EVENT_FINGER_DOWN) device_ = InputDevice::Touch;
     // Presses go to the binding being captured. Releases of what was held
     // before still reach ImGui, which saw the press that started the capture.
     if (capturing_binding_ && interactive_) {
@@ -321,6 +322,14 @@ bool Layer::handle_event(const SDL_Event &event) {
             case SDL_EVENT_MOUSE_BUTTON_UP:
                 if (release(input::mouse_button(event.button.button))) return true;
                 break;
+            case SDL_EVENT_MOUSE_WHEEL: {
+                const float delta = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+                if (event.wheel.which != SDL_TOUCH_MOUSEID && std::isfinite(delta) && delta != 0.0f) {
+                    press(delta > 0.0f ? input::kWheelUp : input::kWheelDown);
+                    finish_capture(false);
+                }
+                return true;
+            }
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 device_ = InputDevice::Gamepad;
                 last_pad_button_ = now;
@@ -376,6 +385,7 @@ bool Layer::handle_event(const SDL_Event &event) {
         break;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
+        if (event.type == SDL_EVENT_KEY_DOWN) device_ = InputDevice::Keyboard;
         // Android's Back is Esc: it opens and closes the menu.
         if (event.key.key == SDLK_ESCAPE
 #if defined(__ANDROID__)
@@ -385,11 +395,12 @@ bool Layer::handle_event(const SDL_Event &event) {
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) escape_pending_ = now;
             return true;
         }
-        if (event.type == SDL_EVENT_KEY_DOWN) device_ = InputDevice::Keyboard;
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        device_ = event.button.which == SDL_TOUCH_MOUSEID ? InputDevice::Touch : InputDevice::Keyboard;
+        break;
     case SDL_EVENT_MOUSE_WHEEL:
-        device_ = InputDevice::Keyboard;
+        if (event.wheel.which != SDL_TOUCH_MOUSEID) device_ = InputDevice::Keyboard;
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         device_ = InputDevice::Gamepad;

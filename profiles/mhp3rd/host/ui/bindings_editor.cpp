@@ -698,7 +698,7 @@ void action_row(Target action, const Columns &c, bool locked, input::PadStyle st
                         ". Select it to press something else in its place; clear it with its ×.";
                 else
                     description = std::string("Add a binding on the ") + device_name(pad) + ": press " +
-                        (pad ? "a button" : "a key or a mouse button") +
+                        (pad ? "a button" : "a key, mouse button or wheel direction") +
                         ", or up to four together in any order for a combination.";
                 if (locked) description += std::string("\nSet by ") + settings::overridden_by("input.preset");
                 layer.set_description(description);
@@ -939,7 +939,7 @@ void bindings_capture_prompt() {
     const std::string what = c.adding ? (input::count(slots) == 0u ? "New binding" : "Another binding")
                                       : "In place of " + chord_label(slots[c.slot], pad, style);
     const std::string big = !held.empty() ? held + (layer.capture_held().size() < input::kChordInputs ? "  + …" : "")
-                                          : (pad ? "Press a button" : "Press a key or a mouse button");
+                                          : (pad ? "Press a button" : "Press a key, mouse button or wheel direction");
     const std::string example = pad
         ? input::label(
               input::chord(input::pad(input::PadInput::LeftShoulder), input::pad(input::PadInput::East)), style) +

@@ -1,6 +1,7 @@
 #include "input/bindings.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <cstddef>
 #include <cstdlib>
@@ -334,13 +335,48 @@ bool read_held(std::size_t target) {
 
 } // namespace
 
+void WheelInput::push(float delta) {
+    if (!std::isfinite(delta)) return;
+    fraction_ += std::clamp(delta, -64.0f, 64.0f);
+    while (std::abs(fraction_) >= 1.0f) {
+        const int direction = fraction_ > 0.0f ? 1 : -1;
+        if (pending_.size() < 64u) pending_.push_back(direction);
+        fraction_ -= static_cast<float>(direction);
+    }
+}
+
+void WheelInput::update(std::uint64_t now_ms) {
+    if (now_ms < until_) return;
+    if (direction_ != 0) {
+        direction_ = 0;
+        until_ = now_ms + 34u;
+    } else if (!pending_.empty()) {
+        direction_ = pending_.front();
+        pending_.pop_front();
+        until_ = now_ms + 50u;
+    }
+}
+
+bool WheelInput::held(Binding binding) const {
+    return direction_ != 0 && wheel_direction(binding) == direction_;
+}
+
+void WheelInput::reset() {
+    pending_.clear();
+    fraction_ = 0;
+    direction_ = 0;
+    until_ = 0;
+}
+
 bool valid(const Chord &c) {
     const std::size_t n = c.size();
     if (n == 0u) return false;
     for (std::size_t i = n; i < kChordInputs; ++i)
         if (c.inputs[i] != kNone) return false;
     for (std::size_t i = 0; i < n; ++i) {
-        if (key_position(c.inputs[i]) < 0 && mouse_button_of(c.inputs[i]) == 0 && !is_pad(c.inputs[i])) return false;
+        if (key_position(c.inputs[i]) < 0 && mouse_button_of(c.inputs[i]) == 0 && wheel_direction(c.inputs[i]) == 0 &&
+            !is_pad(c.inputs[i]))
+            return false;
         if (!same_device(c.inputs[i], c.inputs[0])) return false;
         for (std::size_t j = i + 1u; j < n; ++j)
             if (c.inputs[i] == c.inputs[j]) return false;
@@ -455,6 +491,8 @@ bool acts_on_release(Action action) {
 }
 
 std::string name(Binding binding) {
+    if (binding == kWheelUp) return "Mouse Wheel Up";
+    if (binding == kWheelDown) return "Mouse Wheel Down";
     if (const int button = mouse_button_of(binding)) return kMouseNames[button - 1];
     if (const PadName *p = pad_name(binding)) return std::string(kPadPrefix) + p->name;
     if (is_pad(binding)) return std::string(kPadPrefix) + std::to_string(pad_input_of(binding));
@@ -467,6 +505,8 @@ std::string name(Binding binding) {
 
 Binding from_name(std::string_view text) {
     text = trim(text);
+    if (equal_ignoring_case(text, "Mouse Wheel Up")) return kWheelUp;
+    if (equal_ignoring_case(text, "Mouse Wheel Down")) return kWheelDown;
     for (std::size_t i = 0; i < std::size(kMouseNames); ++i)
         if (equal_ignoring_case(text, kMouseNames[i])) return mouse_button(static_cast<int>(i) + 1);
     if (text.size() > kPadPrefix.size() && equal_ignoring_case(text.substr(0, kPadPrefix.size()), kPadPrefix)) {

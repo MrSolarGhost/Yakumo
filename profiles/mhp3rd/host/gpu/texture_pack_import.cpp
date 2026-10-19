@@ -73,7 +73,8 @@ bool holds_pack(const fs::path &folder) {
 
 bool lists(const std::vector<std::string> &games, const std::string &game_id) {
     const std::string wanted = lower(game_id);
-    return std::any_of(games.begin(), games.end(), [&](const std::string &game) { return lower(game) == wanted; });
+    return std::any_of(
+        games.begin(), games.end(), [&](const std::string &game) { return texture_pack_game_matches(game, wanted); });
 }
 
 // Files a copy leaves out: the file managers' own (.DS_Store, Thumbs.db,
@@ -178,8 +179,10 @@ fs::path find_pack(const fs::path &chosen, const std::string &game_id, std::stri
         }
         std::sort(candidates.begin(), candidates.end());
         for (const fs::path &candidate : candidates) {
-            if (!lists(texture_pack_games(candidate / "textures.ini"), game_id)) continue;
-            layout = "Found as " + name_of(candidate) + ", whose textures.ini lists " + game_id + ".";
+            const auto games = texture_pack_games(candidate / "textures.ini");
+            if (!lists(games, game_id) && !(games.empty() && texture_pack_game_matches(name_of(candidate), game_id)))
+                continue;
+            layout = "Found in " + name_of(candidate) + ".";
             if (looks_like_game_id(name_of(candidate))) made_for = name_of(candidate);
             return candidate;
         }
@@ -188,9 +191,6 @@ fs::path find_pack(const fs::path &chosen, const std::string &game_id, std::stri
 }
 
 std::string friendly(const std::string &error) {
-    if (lower(error).find("hash = quick") != std::string::npos)
-        return "The pack uses the old \"quick\" hash, which Yakumo does not support. Only packs that use xxh64 or "
-               "xxh32 work.";
     if (error.find("zipped") != std::string::npos)
         return "The pack is zipped (textures.zip). Unpack it first, then choose the unpacked folder.";
     return "textures.ini cannot be used: " + error;
@@ -229,24 +229,16 @@ TexturePackCheck check_texture_pack(const fs::path &chosen, const std::string &g
         return check;
     }
 
-    // A folder named for another release is only taken when it says it
-    // covers this game too.
+    // A chosen folder's name is not evidence of incompatible texture contents.
+    // Honor an explicit game list, including the known PSP release alias.
     const std::string folder_name = name_of(check.folder);
     const std::vector<std::string> games = texture_pack_games(check.folder / "textures.ini");
-    if (lower(folder_name) != lower(game_id) && !lists(games, game_id)) {
-        if (looks_like_game_id(folder_name)) {
-            check.problem = "This pack is for " + folder_name + ", and its textures.ini does not list " + game_id +
-                " under [games], so its textures would not match this release.";
-            return check;
-        }
-        if (!games.empty()) {
-            check.problem = "This pack's textures.ini lists other games under [games] (" + games.front() +
-                (games.size() > 1u ? ", …" : "") + ") but not " + game_id + ".";
-            return check;
-        }
-    } else if (lower(folder_name) != lower(game_id) && looks_like_game_id(folder_name)) {
-        check.made_for = folder_name;
+    if (!games.empty() && !lists(games, game_id)) {
+        check.problem = "This pack's textures.ini lists other games under [games], but not " + game_id +
+            " or its compatible PSP release.";
+        return check;
     }
+    if (lower(folder_name) != lower(game_id) && looks_like_game_id(folder_name)) check.made_for = folder_name;
 
     TexturePackInfo info;
     std::string error;
@@ -430,6 +422,42 @@ bool install_staged_texture_pack(const fs::path &staging, const fs::path &textur
             fs::rename(backup, destination, restore);
             if (!restore) backup.clear();
         }
+        return false;
+    }
+    return true;
+}
+
+bool remove_installed_texture_pack(const fs::path &textures_root, const std::string &game_id, std::string &error) {
+    error.clear();
+    if (textures_root.empty() || !looks_like_game_id(game_id)) {
+        error = "Invalid installed texture pack location.";
+        return false;
+    }
+    std::error_code ec;
+    const auto root_status = fs::symlink_status(textures_root, ec);
+    if (ec || !fs::is_directory(root_status) || fs::is_symlink(root_status)) {
+        error = "The textures folder is unavailable or is a symbolic link.";
+        return false;
+    }
+    const fs::path root = fs::canonical(textures_root, ec);
+    if (ec) {
+        error = "Cannot resolve the textures folder: " + ec.message();
+        return false;
+    }
+    const fs::path target = root / game_id;
+    const auto status = fs::symlink_status(target, ec);
+    if (ec || !fs::is_directory(status) || fs::is_symlink(status)) {
+        error = "No installed texture pack folder, or the folder is a symbolic link.";
+        return false;
+    }
+    const fs::path resolved = fs::canonical(target, ec);
+    if (ec || resolved.parent_path() != root) {
+        error = "The installed pack resolves outside the textures folder.";
+        return false;
+    }
+    fs::remove_all(target, ec);
+    if (ec) {
+        error = "Some installed texture pack files could not be removed: " + ec.message();
         return false;
     }
     return true;

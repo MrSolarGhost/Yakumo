@@ -28,8 +28,8 @@
     "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/fonts/game_font.hpp": {
-    "sha256": "aaa3f12152c49d0a5ffc87518df4620cffb4bec45ee1420ee29ffb822820c83e",
-    "reason": "Constants, aggregate fields and function declarations have no standalone LLVM line map; the Cyrillic classification implementation and tests remain subject to the normal diff gate. This header change documents the traced layout only."
+    "sha256": "9223159afa8d5a6a8abd8de9847bdf72bec22c45ee24ecad398ebf6df2ef2e2d",
+    "reason": "Reviewed comments and a character-class function declaration only; no executable body is exempted. The shared classifier and half-width glyph rasterization are tested in the kernel/font suite and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/platform/android_jni.hpp": {
     "sha256": "37be29a64d74990724f832706414997bca88ccf277b1b4e35f4e0132510ea91d",
@@ -44,8 +44,8 @@
     "reason": "Reviewed comments and function declarations only; the change documents the shared PSP and Action editor. No executable body is exempted. Editor implementations and renderer/UI regression tests remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/touch_overlay.hpp": {
-    "sha256": "ffe6474d8dc66c959278ab6cd50ce3534c4189f89090b3c4a16746bcd838baf9",
-    "reason": "Reviewed include and drawing-function declaration only; ElementLook remains an aggregate. No executable body is exempted. PSP and Action drawing implementations and renderer/UI regression tests remain subject to the normal diff gate."
+    "sha256": "23488df2e5985e35f0977e71e9bf32f3c920d6928a6cf915ecbf6fb82f1eafe5",
+    "reason": "Reviewed aggregate direction-mask field only; no executable body is exempted. Action and PSP D-pad drawing is exercised by renderer/touch UI tests and remains subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/layered_armor_screen.hpp": {
     "sha256": "c154c41c563ca09adbb76ecfe0376247dcf7c2867af6100b1b5a51602573ef96",
@@ -70,5 +70,17 @@
   "profiles/mhp3rd/host/gpu/vulkan_renderer.hpp": {
     "sha256": "da8d09b0d501f8f5436b9da4d3f64c4e6ae395c816a49949bd0ff37f7a485382",
     "reason": "Reviewed activation-consumer declaration and comments only; no executable header body changed. This header has no standalone LLVM line map in the native inventory. On/Auto activation, inactive states, one-shot consumption, UI display and expiry are tested in renderer/UI regressions; out-of-line renderer and menu implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/gpu/texture_pack_import.hpp": {
+    "sha256": "238e36ba2e5b2ce197d432c60bf80cde774e28d3f4eb8bcb3eb80412eab41b5a",
+    "reason": "Reviewed installed-pack removal function declaration only; no executable body is exempted. Removal, rejection and file-preservation behavior is covered by texture-pack and renderer/UI tests and remains subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/texture_pack_screen.hpp": {
+    "sha256": "c0e196012543d20dc76c6f1d1cb8f1d95f1b07d3c12b376d6136485b5491fe2a",
+    "reason": "Reviewed game-data row function declaration only; no executable body is exempted. Confirmation, cancellation and removal through the actual UI are tested and remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/widgets.hpp": {
+    "sha256": "b8da36c98559426edfcc5d276933983397ff89b512ad836d72df264b89e8e42f",
+    "reason": "Reviewed optional touch-footer parameter declaration and its documentation only; no executable function body is exempted. Actual touch-menu footer bounds, device switching, drag cancellation and tap-to-resume are tested in renderer/UI contracts. Widget and menu implementations remain subject to the normal diff gate."
   }
 }

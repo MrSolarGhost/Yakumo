@@ -30,6 +30,8 @@ constexpr ElementInfo kInfo[kElements] = {
     {"select", "Select"},
     {"swipe", "Swipe area"},
     {"r3", "R3"},
+    {"dpad", "D-Pad"},
+    {"dpad_toggle", "D-Pad Toggle"},
 };
 
 ActionLayout make_default() {
@@ -59,11 +61,14 @@ ActionLayout make_default() {
     // Above the middle, clear of both thumbs' elements.
     set(Element::Swipe, Anchor::Centre, 0.0f, 0.30f, 0.09f, 0u);
     set(Element::R3, Anchor::Right, 0.075f, 0.925f, 0.04f, 0u);
+    set(Element::DPad, Anchor::Left, 0.30f, 0.42f, 0.11f, 0u);
+    l.at(Element::DPad).shown = false;
+    set(Element::DpadToggle, Anchor::Left, 0.07f, 0.22f, 0.035f, 0u);
     return l;
 }
 
 bool is_button(Element e) {
-    return e != Element::Stick && e != Element::Swipe;
+    return e != Element::Stick && e != Element::Swipe && e != Element::DPad;
 }
 
 // The right thumb's buttons, which a thumb may slide across.
@@ -106,7 +111,7 @@ const ElementInfo &info(Element element) {
 }
 
 bool rebindable(Element element) {
-    return is_button(element) && element != Element::Pause && element != Element::R3;
+    return is_button(element) && element != Element::Pause && element != Element::R3 && element != Element::DpadToggle;
 }
 
 const std::vector<ButtonChoice> &button_choices() {
@@ -231,7 +236,10 @@ Placement move_to(const Placement &placement, Element element, Point centre, con
 
 void ActionControls::set_layout(const ActionLayout &layout, const Area &area, float scale) {
     layout_ = layout;
-    layout_.at(Element::R3).buttons = 0u;
+    for (const Element e : {Element::R3, Element::DPad, Element::DpadToggle}) layout_.at(e).buttons = 0u;
+    if (!layout_.at(Element::DPad).shown)
+        for (auto &finger : fingers_)
+            if (finger.role == Role::DPad) finger.role = Role::None;
     area_ = area;
     scale_ = scale;
     for (std::size_t i = 0; i < kElements; ++i)
@@ -295,7 +303,20 @@ void ActionControls::finger_down(std::uint64_t id, Point at, std::uint64_t ms) {
         slot->element = *button;
         slot->over = true;
         if (*button == Element::Pause) menu_tapped_ = true;
+        if (*button == Element::DpadToggle) {
+            dpad_toggled_ = !dpad_toggled_;
+            auto &dpad = layout_.at(Element::DPad);
+            dpad.shown = !dpad.shown;
+            if (!dpad.shown)
+                for (auto &finger : fingers_)
+                    if (finger.role == Role::DPad) finger.role = Role::None;
+        }
         ++haptics_;
+    } else if (layout_.at(Element::DPad).shown &&
+        std::hypot(at.x - placed(Element::DPad).centre.x, at.y - placed(Element::DPad).centre.y) <=
+            placed(Element::DPad).radius * 1.15f) {
+        slot->role = Role::DPad;
+        if (dpad_held() != 0u) ++haptics_;
     } else if (layout_.at(Element::Stick).shown && !stick_finger_ &&
         std::hypot(at.x - stick.centre.x, at.y - stick.centre.y) <= stick.radius * 1.8f) {
         slot->role = Role::Stick;
@@ -313,6 +334,13 @@ void ActionControls::finger_move(std::uint64_t id, Point at, std::uint64_t ms) {
     if (finger == nullptr) return;
     const float unit = std::max(area_.height, 1.0f);
     switch (finger->role) {
+    case Role::DPad: {
+        const auto &p = placed(Element::DPad);
+        const auto before = dpad_buttons({finger->last.x - p.centre.x, finger->last.y - p.centre.y}, p.radius);
+        const auto after = dpad_buttons({at.x - p.centre.x, at.y - p.centre.y}, p.radius);
+        if (after != 0u && before != after) ++haptics_;
+        break;
+    }
     case Role::Stick:
         stick_thumb_ = at;
         break;
@@ -381,12 +409,13 @@ void ActionControls::release_all() {
     stick_thumb_ = {};
     camera_drag_ = {};
     menu_tapped_ = false;
+    dpad_toggled_ = false;
     haptics_ = 0;
     swipe_until_[0] = swipe_until_[1] = 0u;
 }
 
 std::uint16_t ActionControls::buttons(std::uint64_t ms) const {
-    std::uint16_t buttons = 0u;
+    std::uint16_t buttons = dpad_held();
     for (const Finger &finger : fingers_)
         if (finger.used && finger.role == Role::Button && finger.over) buttons |= layout_.at(finger.element).buttons;
     if (ms < swipe_until_[0]) buttons |= kLeft;
@@ -396,6 +425,7 @@ std::uint16_t ActionControls::buttons(std::uint64_t ms) const {
 
 bool ActionControls::held(Element element) const {
     if (element == Element::Stick) return stick_held();
+    if (element == Element::DPad) return dpad_held() != 0u;
     for (const Finger &finger : fingers_)
         if (finger.used && finger.role == Role::Button && finger.over && finger.element == element) return true;
     return false;
@@ -417,6 +447,22 @@ bool ActionControls::take_menu() {
     const bool tapped = menu_tapped_;
     menu_tapped_ = false;
     return tapped;
+}
+
+std::uint16_t ActionControls::dpad_held() const {
+    std::uint16_t held = 0u;
+    if (!layout_.at(Element::DPad).shown) return held;
+    const auto &p = placed(Element::DPad);
+    for (const auto &finger : fingers_)
+        if (finger.used && finger.role == Role::DPad)
+            held |= dpad_buttons({finger.last.x - p.centre.x, finger.last.y - p.centre.y}, p.radius);
+    return held;
+}
+
+bool ActionControls::take_dpad_toggle() {
+    const bool toggled = dpad_toggled_;
+    dpad_toggled_ = false;
+    return toggled;
 }
 
 int ActionControls::take_haptics() {

@@ -38,7 +38,10 @@
 // So the host reports a 20x20 maximum glyph, which gives cells that are as
 // large as the buffer and never overlap, and fits every glyph inside the cell,
 // away from its edges, by shifting it and, if it is still too large, scaling it
-// down. The metrics reported are those of the bitmap drawn.
+// down. Half-width letters are expanded horizontally before the game's cell
+// squeeze, keeping their ink from being compressed twice. Their height and
+// the game's advances stay unchanged; MHP3RD_ORIGINAL_FONT_SPACING restores
+// the previous rasterization for comparison. The metrics match the bitmap.
 namespace mhp3rd::fonts {
 
 // The game's glyph buffer and, with the metrics below, its atlas cell.
@@ -81,6 +84,8 @@ struct GlyphBitmap {
 
 // Loads the fonts on first use. False when no font could be loaded at all.
 bool ready();
+// The game's full-width (0), half-width (1) and half-width katakana (2) cells.
+[[nodiscard]] std::uint32_t character_class(std::uint32_t code);
 [[nodiscard]] GlyphMetrics metrics(std::uint32_t code);
 // Renders `code` shifted right by shift_x and down by shift_y, both in [0, 1).
 [[nodiscard]] GlyphBitmap render(std::uint32_t code, float shift_x, float shift_y);

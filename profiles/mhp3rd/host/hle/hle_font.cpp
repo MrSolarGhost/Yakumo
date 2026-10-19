@@ -280,12 +280,7 @@ void install_character_class(Runtime &runtime) {
 } // namespace
 
 std::uint32_t font_character_class(std::uint32_t code) {
-    code &= 0xFFFFu;
-    // Cyrillic and its supplement use the same cell layout as Latin letters.
-    if (code >= 0x0400u && code <= 0x052Fu) return 1u;
-    if (code < 0x0250u || (code >= 0x20A0u && code <= 0x20CFu) || code >= 0xFFF0u) return 1u;
-    if (code >= 0xFF60u && code <= 0xFFDFu) return 2u;
-    return 0u;
+    return fonts::character_class(code);
 }
 
 void register_font(HleRegistrar &hle) {

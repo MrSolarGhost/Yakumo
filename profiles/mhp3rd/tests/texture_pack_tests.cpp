@@ -148,12 +148,23 @@ void test_games(const fs::path &root) {
     const fs::path other = root / "games3" / "ULJM05800";
     make_pack(other, std::string(kIni) + "\n[games]\nULJM05800 = true\n");
     c = check_texture_pack(other, kGame);
-    check(!c.ok() && c.problem.find("ULJM05800") != std::string::npos, "a ULJM05800 pack without NPJB40001 is refused");
+    check(c.ok() && c.made_for == "ULJM05800", "a PSP pack is accepted without an explicit HD game entry");
     make_pack(root / "games4" / "ULJM05800");
     c = check_texture_pack(root / "games4" / "ULJM05800", kGame);
-    check(!c.ok(), "a ULJM05800 pack without [games] is refused");
+    check(c.ok(), "a directly selected PSP pack needs no games section");
     c = check_texture_pack(root / "games4", kGame);
-    check(!c.found(), "and is not picked from its parent folder");
+    check(c.ok(), "a PSP pack is also discovered from its parent folder");
+    make_pack(root / "custom-name" / "Anything");
+    check(check_texture_pack(root / "custom-name" / "Anything", kGame).ok(),
+        "a chosen arbitrary folder name is accepted");
+    make_pack(root / "unrelated", std::string(kIni) + "\n[games]\nULUS99999 = true\n");
+    check(!check_texture_pack(root / "unrelated", kGame).ok(), "an explicitly unrelated game remains rejected");
+    write(other / "textures.ini", std::string(kIni) + "\n[games]\nuljm05800 = psp.ini\n");
+    write(other / "psp.ini", "[hashes]\n00000000aaaaaaaabbbbbbbb = ui/capcom.png\n");
+    check(check_texture_pack(other, kGame).keys == 5u, "the PSP override is used when no HD override is present");
+    write(other / "textures.ini", std::string(kIni) + "\n[games]\nULJM05800 = missing.ini\nnpjb40001 = hd.ini\n");
+    write(other / "hd.ini", "[hashes]\n00000000aaaaaaaacccccccc = ui/capcom.png\n");
+    check(check_texture_pack(other, kGame).ok(), "the exact HD override takes precedence over the PSP entry");
     // An override ini named in [games] for this release is read.
     const fs::path overridden = root / "games5" / kGame;
     make_pack(overridden, std::string(kIni) + "\n[games]\nNPJB40001 = hd.ini\n");
@@ -167,8 +178,7 @@ void test_hashes(const fs::path &root) {
     quick.replace(quick.find("xxh64"), 5, "quick");
     make_pack(root / "quick" / kGame, quick);
     TexturePackCheck c = check_texture_pack(root / "quick", kGame);
-    check(c.found() && !c.ok() && c.problem.find("\"quick\" hash") != std::string::npos,
-        "hash = quick is refused with its reason");
+    check(c.ok() && c.hash == TexturePackHash::Quick, "the legacy quick hash is accepted");
     std::string xxh32 = kIni;
     xxh32.replace(xxh32.find("xxh64"), 5, "xxh32");
     make_pack(root / "xxh32" / kGame, xxh32);
@@ -362,8 +372,87 @@ void test_dxt_decode() {
     check(texture_key(memory, texture) == before, "a DXT texture's key does not follow the CLUT");
 }
 
+void test_quick_keys() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t address = 0x08800000u;
+    for (std::uint32_t i = 0; i < 256; ++i) memory.store8(address + i, static_cast<std::uint8_t>(i));
+    TextureState texture;
+    texture.address = address;
+    texture.format = TextureFormat::Rgba8888;
+    texture.width = texture.buffer_width = 4;
+    TexturePackOptions options;
+    options.hash = TexturePackHash::Quick;
+    options.ignore_address = options.reduce_hash = true; // quick ignores these unsafe options
+    const struct {
+        std::uint16_t rows;
+        std::uint32_t expected;
+    } cases[] = {{1, 0}, {2, 0}, {3, 0}, {4, 0xdb8be980u}, {8, 0xd70047e4u}, {12, 0xe340f138u}, {16, 0xaff647dcu}};
+    for (const auto &item : cases) {
+        texture.height = item.rows;
+        TexturePackKey key;
+        std::uint32_t w{}, h{};
+        check(compute_texture_pack_key(memory, texture, 0, options, key, w, h) && key.data_hash == item.expected,
+            "quick key matches the fixed little-endian format vector for " + std::to_string(item.rows * 16) + " bytes");
+        check(key.cache_key >> 32u == address, "quick keeps the guest address in the key");
+    }
+    {
+        const Scratch scratch;
+        make_pack(scratch.root,
+            "[options]\nhash=quick\nignoreAddress=true\nreduceHash=true\n[hashes]\n0880000000000402aff647dc=ui/capcom.png\n");
+        std::string error;
+        auto pack = TexturePack::open(scratch.root, kGame, error);
+        check(pack && !pack->options().ignore_address && !pack->options().reduce_hash,
+            "loading a quick pack normalizes unsafe hash options");
+        const auto replacement = pack ? pack->find(memory, texture, 0) : nullptr;
+        check(replacement && replacement->name == "ui/capcom.png",
+            "known quick key resolves the pack's replacement image");
+    }
+    texture.width = 2;
+    texture.height = 1;
+    TexturePackKey key;
+    std::uint32_t w{}, h{};
+    check(compute_texture_pack_key(memory, texture, 0, options, key, w, h) && key.data_hash == 0x04040404u,
+        "an eight-byte quick row uses the short-input rule");
+    texture.format = TextureFormat::Dxt1;
+    texture.width = texture.height = 4;
+    check(compute_texture_pack_key(memory, texture, 0, options, key, w, h) && key.data_hash == 0,
+        "quick ignores incomplete eight-byte pairs in narrow strided rows");
+    texture.format = TextureFormat::Rgba8888;
+    texture.buffer_width = 8;
+    check(compute_texture_pack_key(memory, texture, 0, options, key, w, h) && key.data_hash == 0,
+        "quick strided textures hash only the selected row bytes");
+}
+
+void test_pack_removal() {
+    const Scratch scratch;
+    const fs::path textures = scratch.root / "textures";
+    const fs::path installed = textures / kGame;
+    make_pack(installed);
+    write(textures / ".backup" / "old" / "keep.txt", "backup");
+    write(scratch.root / "external" / "keep.txt", "external");
+    write(scratch.root / "ms0" / "save", "save");
+    std::string error;
+    check(!remove_installed_texture_pack(textures, "../external", error) && fs::exists(installed),
+        "removal rejects path traversal");
+    check(!remove_installed_texture_pack({}, kGame, error), "removal rejects an empty root");
+    check(remove_installed_texture_pack(textures, kGame, error) && error.empty() && !fs::exists(installed),
+        "removal deletes the installed pack");
+    check(read(textures / ".backup" / "old" / "keep.txt") == "backup" &&
+            read(scratch.root / "external" / "keep.txt") == "external" && read(scratch.root / "ms0" / "save") == "save",
+        "removal preserves backups, external folders and saves");
+    check(!remove_installed_texture_pack(textures, kGame, error), "a missing pack reports failure");
+    std::error_code ec;
+    fs::create_directory_symlink(scratch.root / "external", installed, ec);
+    if (!ec) {
+        check(!remove_installed_texture_pack(textures, kGame, error) && fs::exists(installed / "keep.txt"),
+            "removal refuses a linked pack pointing outside the installed folder");
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc == 3 && std::string(argv[1]) == "--check") return check_folder(argv[2]);
+    test_pack_removal();
+    test_quick_keys();
     const Scratch scratch;
     test_layouts(scratch.root);
     test_games(scratch.root);

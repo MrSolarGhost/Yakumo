@@ -392,6 +392,8 @@ int main() {
         using namespace mhp3rd::input::touch;
         Settings edited = from_entries({});
         edited.touch_psp.floating_stick = false;
+        edited.touch_action.at(Element::DPad) = {Anchor::Left, 0.4f, 0.5f, 0.1f, 0, true};
+        edited.touch_action.at(Element::DpadToggle).shown = false;
         edited.touch_psp.at(PspElement::Circle) = {Anchor::Left, 0.6f, 0.7f, 0.09f, 0x2200, false};
         check(add_psp_combo(edited.touch_psp).has_value(), "a PSP combination can be added before saving");
         edited.touch_psp.at(PspElement::Combo1).shown = false;
