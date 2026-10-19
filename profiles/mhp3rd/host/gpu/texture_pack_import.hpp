@@ -140,6 +140,11 @@ bool install_staged_texture_pack(const std::filesystem::path &staging, const std
     const std::string &game_id, const std::filesystem::path &backup_dir, std::filesystem::path &backup,
     std::string &error);
 
+// Deletes only the installed copy inside textures_root. Symlinked pack folders
+// and invalid IDs are refused; externally selected folders are never consulted.
+bool remove_installed_texture_pack(
+    const std::filesystem::path &textures_root, const std::string &game_id, std::string &error);
+
 // Removes a staging folder this import made. Never called on anything else.
 void discard_staged_texture_pack(const std::filesystem::path &staging);
 

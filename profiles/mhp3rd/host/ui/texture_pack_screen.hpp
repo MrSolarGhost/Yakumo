@@ -9,6 +9,8 @@ namespace mhp3rd::ui {
 // The rows under Texture pack: Import texture pack…, Open the textures
 // folder, and, for a pack used in place, a row that stops using it.
 void texture_pack_rows();
+// System > Game Data: remove the installed copy after confirmation.
+void texture_pack_data_rows();
 
 // Whether the import screen is open.
 [[nodiscard]] bool texture_pack_screen_open();

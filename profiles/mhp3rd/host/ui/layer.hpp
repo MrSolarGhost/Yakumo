@@ -30,7 +30,7 @@ class VulkanRenderer;
 // dropped; a real key press is acted on a few frames late, which nobody notices.
 namespace mhp3rd::ui {
 
-enum class InputDevice { Keyboard, Gamepad };
+enum class InputDevice { Keyboard, Gamepad, Touch };
 
 class Layer {
 public:

@@ -468,7 +468,49 @@ void test_action_fingers() {
 
 } // namespace
 
+void test_action_dpad_toggle() {
+    using namespace mhp3rd::input::touch;
+    ActionControls controls;
+    ActionLayout layout = default_action_layout();
+    controls.set_layout(layout, safe_area(1600, 900, {}), 1.0f);
+    const auto dpad = controls.placed(Element::DPad);
+    const auto toggle = controls.placed(Element::DpadToggle).centre;
+    const Point right{dpad.centre.x + dpad.radius * 0.8f, dpad.centre.y};
+    check(!layout.at(Element::DPad).shown && !rebindable(Element::DPad) && !rebindable(Element::DpadToggle),
+        "Action D-pad starts hidden and host controls cannot be rebound");
+    controls.finger_down(1, toggle, 10);
+    check(controls.take_dpad_toggle() && !controls.take_dpad_toggle() && controls.layout().at(Element::DPad).shown,
+        "toggle shows the Action D-pad once");
+    controls.finger_up(1, 11);
+    controls.finger_down(2, right, 12);
+    check(controls.dpad_held() == 0x20u && controls.buttons(12) == 0x20u && controls.held(Element::DPad),
+        "Action D-pad presses the requested direction");
+    controls.finger_move(2, {right.x, right.y - dpad.radius * 0.8f}, 13);
+    check(controls.dpad_held() == 0x30u && controls.take_camera_drag().x == 0.0f,
+        "diagonal D-pad motion does not turn the camera");
+    controls.finger_down(3, controls.placed(Element::Attack).centre, 14);
+    check((controls.buttons(14) & 0x1000u) != 0u, "D-pad works alongside action buttons");
+    controls.finger_down(1, toggle, 15);
+    check(controls.take_dpad_toggle() && controls.dpad_held() == 0u && controls.buttons(15) == 0x1000u,
+        "hiding the D-pad releases its finger while keeping an attack held");
+    controls.finger_up(1, 16);
+    controls.finger_down(1, toggle, 17);
+    check(controls.dpad_held() == 0u, "showing the D-pad does not revive the old finger");
+    controls.release_all();
+    layout = controls.layout();
+    layout.at(Element::DPad).buttons = 0x4000u;
+    layout.at(Element::DpadToggle).buttons = 0x4000u;
+    controls.set_layout(layout, safe_area(1600, 900, {}), 1.0f);
+    controls.finger_down(4, right, 20);
+    check(controls.buttons(20) == 0x20u, "malformed D-pad bindings cannot inject other PSP buttons");
+    layout.at(Element::DPad).shown = false;
+    controls.set_layout(layout, safe_area(1600, 900, {}), 1.0f);
+    check(controls.buttons(21) == 0u, "editor visibility releases a held D-pad direction");
+    check(controls.take_haptics() >= 1, "Action D-pad presses request haptic feedback");
+}
+
 int main() {
+    test_action_dpad_toggle();
     test_psp_relative_sizes();
     test_psp_haptics();
     test_psp_editing();

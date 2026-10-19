@@ -1384,7 +1384,7 @@ void utility_and_savedata_contracts() {
 }
 
 // An independently authored minimal sfnt with one square glyph, no external font.
-static std::array<unsigned char, 640> contract_font() {
+static std::array<unsigned char, 640> contract_font(unsigned width = 20, bool unicode = false) {
     std::array<unsigned char, 640> data{};
     auto u16 = [&](int at, unsigned value) {
         data[at] = static_cast<unsigned char>(value >> 8);
@@ -1420,13 +1420,27 @@ static std::array<unsigned char, 640> contract_font() {
     u32(564, 0);
     u32(568, 34);
     u16(576, 1);
-    u16(582, 20);
+    u16(582, width);
     u16(584, 20);                                  // contour and bounding box.
     u16(586, 3);                                   // last point of the four-point contour; no instructions.
     for (int i = 0; i < 4; ++i) data[590 + i] = 1; // on-curve, signed deltas.
-    u16(596, 20);
-    u16(600, static_cast<unsigned>(-20));
+    u16(596, width);
+    u16(600, 0u - width);
     u16(606, 20);
+    if (unicode) {
+        std::fill(data.begin() + 140, data.begin() + 402, 0);
+        u16(140, 4);
+        u16(142, 48);
+        u16(146, 8);
+        u16(148, 8);
+        u16(150, 2);
+        const unsigned codes[] = {'A', 0x0410, 0x3042, 0xffff};
+        for (int i = 0; i < 4; ++i) {
+            u16(154 + i * 2, codes[i]);
+            u16(164 + i * 2, codes[i]);
+            u16(172 + i * 2, (i == 3 ? 0u : 1u) - codes[i]);
+        }
+    }
     return data;
 }
 void text_width_contracts() {
@@ -1482,6 +1496,60 @@ void text_width_contracts() {
         check(f.ctx.gpr[5] == code && f.ctx.gpr[16] == 0xA5A5A5A5u && f.ctx.gpr[29] == 0xA5A5A5A5u,
             "native classifier preserves arguments, saved registers and stack");
     }
+}
+
+void font_spacing_contracts() {
+    PublicFiles files;
+    const auto bytes = contract_font(8, true);
+    const auto path = files.root / "narrow.ttf";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    }
+    mhp3rd::settings::current().font = path.string();
+    mhp3rd::settings::current().font_weight = 0;
+    const auto original = [](bool on) {
+#if defined(_WIN32)
+        _putenv_s("MHP3RD_ORIGINAL_FONT_SPACING", on ? "1" : "");
+#else
+        if (on)
+            setenv("MHP3RD_ORIGINAL_FONT_SPACING", "1", 1);
+        else
+            unsetenv("MHP3RD_ORIGINAL_FONT_SPACING");
+#endif
+        mhp3rd::fonts::reload();
+    };
+    original(true);
+    const auto latin = mhp3rd::fonts::metrics('A');
+    const auto cyrillic = mhp3rd::fonts::metrics(0x0410);
+    const auto japanese = mhp3rd::fonts::metrics(0x3042);
+    original(false);
+    for (const auto code : {0x41u, 0x0410u}) {
+        const auto glyph = mhp3rd::fonts::metrics(code);
+        const auto old = code == 'A' ? latin : cyrillic;
+        check(
+            glyph.found && glyph.width > old.width && glyph.width <= mhp3rd::fonts::kInkRight - mhp3rd::fonts::kInkLeft,
+            "half-width ink expands within the fixed glyph cell");
+        check(glyph.height == old.height && glyph.top == old.top, "spacing correction preserves height and baseline");
+        const auto bitmap = mhp3rd::fonts::render(code, 0, 0);
+        check(bitmap.width == glyph.width && bitmap.height == glyph.height, "corrected metrics match rasterized ink");
+        const int x64 = (mhp3rd::fonts::kCell - glyph.width) / 2 * 64;
+        const int y64 = (mhp3rd::fonts::kBaseline - glyph.top) * 64;
+        mhp3rd::fonts::note_glyph_pass(code, x64, y64, true);
+        for (int scale : {1, 2, 4}) {
+            const auto cell = mhp3rd::fonts::glyph_cell(code, scale);
+            check(cell.size() == static_cast<std::size_t>(400 * scale * scale) &&
+                    std::any_of(cell.begin(), cell.end(), [](auto ink) { return ink != 0; }),
+                "Sharp Text rerasterizes the corrected cell at each supported scale");
+        }
+    }
+    const auto unchanged = mhp3rd::fonts::metrics(0x3042);
+    check(unchanged.found && unchanged.width == japanese.width && unchanged.height == japanese.height &&
+            unchanged.top == japanese.top,
+        "full-width Japanese glyph metrics remain unchanged");
+    original(true);
+    check(mhp3rd::fonts::metrics('A').width == latin.width, "diagnostic switch restores the original spacing");
+    original(false);
 }
 
 void font_contracts() {
@@ -1612,6 +1680,7 @@ int main(int argc, char **argv) {
         scheduler_deadlock_contracts();
         utility_and_savedata_contracts();
         text_width_contracts();
+        font_spacing_contracts();
         font_contracts();
         hosting_contracts();
         std::cout << "kernel/HLE contracts passed\n";

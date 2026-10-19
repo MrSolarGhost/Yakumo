@@ -140,7 +140,41 @@ bool is_paletted(TextureFormat format) {
         format == TextureFormat::Clut32;
 }
 
+// Legacy texture-key arithmetic, independently expressed per 32-bit lane.
+// Byte order, lane seeds and wraparound are format facts; see SOURCE_PROVENANCE.md.
+std::uint32_t quick_texture_hash(const std::uint8_t *data, std::size_t size) {
+    const auto word = [&](std::size_t offset) {
+        return static_cast<std::uint32_t>(data[offset]) | static_cast<std::uint32_t>(data[offset + 1]) << 8u |
+            static_cast<std::uint32_t>(data[offset + 2]) << 16u | static_cast<std::uint32_t>(data[offset + 3]) << 24u;
+    };
+    std::uint32_t result = 0;
+    if (size % 64u != 0u) {
+        for (std::size_t pair = 0; pair < size / 8u; ++pair) result = (result + word(pair * 8u)) ^ word(pair * 8u + 4u);
+        return result;
+    }
+    constexpr std::uint32_t seeds[] = {0x9bd9c00bu, 0xb6514b73u, 0x43094d9bu, 0x00010083u};
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        std::uint32_t value = 0;
+        const auto weights = [&](std::size_t block) {
+            const auto increment = static_cast<std::uint32_t>(block) * 0x2455u;
+            return ((seeds[lane] + increment) & 0xffffu) | (((seeds[lane] >> 16u) + increment) << 16u);
+        };
+        const auto multiply = [](std::uint32_t a, std::uint32_t b) {
+            return ((a * b) & 0xffffu) | (((a >> 16u) * (b >> 16u)) << 16u);
+        };
+        for (std::size_t block = 0; block < size / 64u; ++block) {
+            const std::size_t offset = block * 64u + lane * 4u;
+            const std::uint32_t product = multiply(word(offset), weights(block));
+            value = ((value + product) & 0xffffu) | (((value >> 16u) + (product >> 16u)) << 16u);
+            value = ((value ^ word(offset + 16u)) + word(offset + 32u)) ^ multiply(word(offset + 48u), weights(block));
+        }
+        result += value + weights(size / 64u);
+    }
+    return result;
+}
+
 std::uint32_t data_hash(const std::uint8_t *data, std::size_t size, TexturePackHash hash) {
+    if (hash == TexturePackHash::Quick) return quick_texture_hash(data, size);
     // xxh64 keys keep the low 32 bits of the 64-bit hash.
     return hash == TexturePackHash::Xxh32 ? XXH32(data, size, kDataSeed)
                                           : static_cast<std::uint32_t>(XXH64(data, size, kDataSeed));
@@ -162,6 +196,12 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path &path) {
 }
 
 } // namespace
+
+bool texture_pack_game_matches(const std::string &candidate, const std::string &game_id) {
+    const std::string wanted = lower(game_id);
+    const std::string offered = lower(candidate);
+    return offered == wanted || (wanted == "npjb40001" && offered == "uljm05800");
+}
 
 std::string format_texture_pack_key(const TexturePackKey &key) {
     char text[32];
@@ -203,7 +243,7 @@ bool compute_texture_pack_key(const GuestMemory &memory, const TextureState &tex
     }
 
     float reduce = 1.0f;
-    if (options.reduce_hash) {
+    if (options.reduce_hash && options.hash != TexturePackHash::Quick) {
         const auto found = options.reduce_hash_ranges.find(width << 16u | height);
         reduce = found != options.reduce_hash_ranges.end() ? found->second : options.reduce_hash_default;
     }
@@ -238,7 +278,9 @@ bool compute_texture_pack_key(const GuestMemory &memory, const TextureState &tex
     // Dimension word: log2 height in bits 8-11, log2 width in bits 0-3.
     const std::uint32_t dimension = static_cast<std::uint32_t>(std::countr_zero(texture.height)) << 8u |
         static_cast<std::uint32_t>(std::countr_zero(texture.width));
-    std::uint64_t cache_key = options.ignore_address ? 0u : static_cast<std::uint64_t>(address & 0x3FFFFFFFu) << 32u;
+    std::uint64_t cache_key = options.ignore_address && options.hash != TexturePackHash::Quick
+        ? 0u
+        : static_cast<std::uint64_t>(address & 0x3FFFFFFFu) << 32u;
     cache_key |= dimension;
     if (is_paletted(texture.format)) {
         // The palette as the last CLUT load read it, plus the entries that the
@@ -320,7 +362,18 @@ std::unique_ptr<TexturePack> TexturePack::parse(
     const std::filesystem::path ini = directory / "textures.ini";
     if (std::filesystem::exists(ini, ec)) {
         if (!pack->load_ini(ini, false, error)) return nullptr;
-        // [games] can name another ini with settings for one game.
+        // Prefer the exact release's override, falling back to the compatible PSP pack.
+        const auto games = texture_pack_games(ini);
+        std::string selected_game = game_id;
+        const auto exact =
+            std::find_if(games.begin(), games.end(), [&](const auto &id) { return lower(id) == lower(game_id); });
+        if (exact != games.end())
+            selected_game = *exact;
+        else {
+            const auto compatible = std::find_if(
+                games.begin(), games.end(), [&](const auto &id) { return texture_pack_game_matches(id, game_id); });
+            if (compatible != games.end()) selected_game = *compatible;
+        }
         std::ifstream file(ini);
         std::string line;
         bool in_games = false;
@@ -335,7 +388,7 @@ std::unique_ptr<TexturePack> TexturePack::parse(
             const std::size_t equals = line.find('=');
             if (equals == std::string::npos) continue;
             pack->games_.push_back(trim(line.substr(0, equals)));
-            if (pack->games_.back() != game_id) continue;
+            if (lower(pack->games_.back()) != lower(selected_game)) continue;
             const std::string name = trim(line.substr(equals + 1u));
             if (name.empty() || name == "true" || name == "textures.ini") continue;
             if (name.find("..") != std::string::npos) {
@@ -344,6 +397,10 @@ std::unique_ptr<TexturePack> TexturePack::parse(
             }
             if (!pack->load_ini(directory / path_from_utf8(name), true, error)) return nullptr;
         }
+    }
+    if (pack->options_.hash == TexturePackHash::Quick) {
+        pack->options_.ignore_address = false;
+        pack->options_.reduce_hash = false;
     }
     pack->scan_hash_named_files();
     if (pack->entries_.empty()) {
@@ -395,10 +452,10 @@ bool TexturePack::load_ini(const std::filesystem::path &path, bool is_override, 
                     options_.hash = TexturePackHash::Xxh64;
                 else if (kind == "xxh32")
                     options_.hash = TexturePackHash::Xxh32;
+                else if (kind == "quick")
+                    options_.hash = TexturePackHash::Quick;
                 else if (!value.empty() || !is_override) {
-                    // "quick" was the format's first hash; packs made with it
-                    // are rare, and it is not implemented here.
-                    error = "textures.ini: hash = " + value + " is not supported (xxh64 and xxh32 are)";
+                    error = "textures.ini: hash = " + value + " is not supported (quick, xxh64 and xxh32 are)";
                     return false;
                 }
                 hash_given = hash_given || !value.empty();

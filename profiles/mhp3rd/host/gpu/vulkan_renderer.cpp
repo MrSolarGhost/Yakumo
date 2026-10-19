@@ -1068,6 +1068,7 @@ struct VulkanRenderer::Impl {
     bool pointer_free{};
     bool scripted_input{};
     bool mouse_captured{};
+    input::WheelInput wheel_input;
     std::uint32_t mouse_buttons{}; // bit n: SDL mouse button n held
     MouseMotion mouse_motion{};
     // Touch screen: the on-screen controls, in window coordinates.
@@ -1183,6 +1184,12 @@ struct VulkanRenderer::Impl {
                 action_touch.finger_move(id, at, ms);
             else
                 action_touch.finger_up(id, ms);
+            if (action_touch.take_dpad_toggle()) {
+                settings::current().touch_action.at(input::touch::Element::DPad).shown =
+                    action_touch.layout().at(input::touch::Element::DPad).shown;
+                settings::save();
+                update_touch_layout();
+            }
             drag = action_touch.take_camera_drag();
         } else {
             if (event.type == SDL_EVENT_FINGER_DOWN)
@@ -1234,6 +1241,7 @@ struct VulkanRenderer::Impl {
         if (!scripted_input) SDL_SetWindowRelativeMouseMode(window, wanted);
         if (pad_tuning().trace) std::cout << "[pad] pointer " << (wanted ? "captured" : "free") << std::endl;
         mouse_buttons = 0u;
+        wheel_input.reset();
         mouse_motion = {};
         if (wanted) suppress_held = true;
     }
@@ -5714,7 +5722,8 @@ bool VulkanRenderer::pump_events() {
         // alone and never reach the game as a mouse.
         if ((event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which != SDL_TOUCH_MOUSEID) ||
             ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
-                event.button.which != SDL_TOUCH_MOUSEID))
+                event.button.which != SDL_TOUCH_MOUSEID) ||
+            (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.which != SDL_TOUCH_MOUSEID))
             impl_->real_mouse_seen = true;
         impl_->handle_touch(event);
         if (event.type == SDL_EVENT_MOUSE_MOTION && impl_->mouse_captured && event.motion.which != SDL_TOUCH_MOUSEID &&
@@ -5727,10 +5736,15 @@ bool VulkanRenderer::pump_events() {
             impl_->mouse_buttons |= 1u << event.button.button;
         if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button < 32u)
             impl_->mouse_buttons &= ~(1u << event.button.button);
-        // The wheel changes the free camera's speed; nothing else uses it.
-        if (event.type == SDL_EVENT_MOUSE_WHEEL && impl_->mouse_captured && impl_->free_camera &&
-            event.wheel.which != SDL_TOUCH_MOUSEID && event.wheel.y != 0.0f)
-            impl_->free_controls.speed_steps += event.wheel.y > 0.0f ? 1 : -1;
+        if (event.type == SDL_EVENT_MOUSE_WHEEL && impl_->mouse_captured && event.wheel.which != SDL_TOUCH_MOUSEID &&
+            (!impl_->scripted_input || event.wheel.which == kScriptedMouse)) {
+            const float delta = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+            if (impl_->free_camera) {
+                if (std::isfinite(delta) && delta != 0.0f) impl_->free_controls.speed_steps += delta > 0.0f ? 1 : -1;
+            } else if (impl_->game_input) {
+                impl_->wheel_input.push(delta);
+            }
+        }
         if (impl_->event_hook && impl_->event_hook(event)) continue;
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F3 && !event.key.repeat && impl_->overlay_ready)
             impl_->overlay_visible = !impl_->overlay_visible;
@@ -5756,6 +5770,7 @@ bool VulkanRenderer::pump_events() {
 void VulkanRenderer::Impl::resolve_bindings(bool focused) {
     const settings::Settings &player = settings::current();
     const std::uint64_t now = SDL_GetTicks();
+    wheel_input.update(now);
     const unsigned window = player.chord_window;
     static const bool trace = std::getenv("MHP3RD_TRACE_PAD") != nullptr;
     const auto log = [&](const char *device, const input::Resolver &resolver) {
@@ -5773,6 +5788,7 @@ void VulkanRenderer::Impl::resolve_bindings(bool focused) {
     typed = keys_resolver.update(
         input::Table{player.controls.keys, player.controls.combos, false},
         [&](input::Binding binding) {
+            if (input::wheel_direction(binding)) return mouse_captured && wheel_input.held(binding);
             if (const int button = input::mouse_button_of(binding))
                 return mouse_captured && (mouse_buttons & (1u << button)) != 0u;
             const int position = input::key_position(binding);
@@ -5869,6 +5885,7 @@ void VulkanRenderer::Impl::sample_lock_on(bool focused) {
     const std::size_t action = static_cast<std::size_t>(input::Action::LockOn);
     const bool *keys = SDL_GetKeyboardState(nullptr);
     const bool typed_now = chord_held(player.controls.keys[action], [&](input::Binding binding) {
+        if (input::wheel_direction(binding)) return mouse_captured && wheel_input.held(binding);
         if (const int button = input::mouse_button_of(binding))
             return mouse_captured && (mouse_buttons & (1u << button)) != 0u;
         const int position = input::key_position(binding);
@@ -6163,6 +6180,7 @@ void VulkanRenderer::set_game_input(bool enabled) {
 void VulkanRenderer::set_free_camera(bool flying) {
     if (!impl_ || impl_->free_camera == flying) return;
     if (!flying) impl_->suppress_held = true;
+    impl_->wheel_input.reset();
     impl_->free_camera = flying;
 }
 

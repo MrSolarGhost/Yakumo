@@ -201,7 +201,7 @@ bool Menu::frame() {
     const bool start = ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false);
     // Back closes the font list, or the save import and export, before it
     // closes the menu.
-    bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
+    bool font_list_was_open = (texture_pack_screen_open() || (tab_ == 0 && font_list_open())) ||
         (tab_ == 2 && controllers_screen_open()) || (tab_ == 4 && layered_armor_screen_open()) ||
         (tab_ == 5 && mods_screen_open()) || (tab_ == 6 && (save_screen_open() || translation_screen_open()));
 #if defined(MHP3RD_DEBUG_MENU)
@@ -236,7 +236,8 @@ bool Menu::frame() {
     const bool switched = (!transfer && requested_tab != tab_) || first_frame_;
     if (!transfer) tab_ = requested_tab;
     first_frame_ = false;
-    begin_content();
+    const bool touch_footer = layer.input_device() == InputDevice::Touch;
+    begin_content(touch_footer);
     MenuPlace &place = menu_place();
     bool restoring = false;
     if (opening && place.known && place.tab == tab_ && !font_list_was_open) {
@@ -301,7 +302,12 @@ bool Menu::frame() {
     }
     begin_footer();
     const BindingsFocus binding = tab_ == 2 ? bindings_focus() : BindingsFocus::None;
-    if (binding == BindingsFocus::Binding && bindings_focus_resettable())
+    if (touch_footer) {
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float width = std::min(available, ImGui::CalcTextSize("Close Menu").x + layer.font_size() * 2.0f);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - width);
+        if (big_button("Close Menu##touch_close_menu", width, false, transfer)) close_ = true;
+    } else if (binding == BindingsFocus::Binding && bindings_focus_resettable())
         hints({{Control::Confirm, "Rebind"}, {Control::Clear, "Clear"}, {Control::Reset, "Reset action"},
             {Control::Back, "Back"}, {Control::Tabs, "Section"}});
     else if (binding == BindingsFocus::Binding)
@@ -1605,6 +1611,7 @@ void Menu::mods() {
 }
 
 void Menu::system() {
+    if (texture_pack_screen(back_)) return;
     if (translation_screen(back_)) return;
     if (save_screen(back_)) {
         if (take_restart_request()) {
@@ -1693,6 +1700,7 @@ void Menu::system() {
     if (button_row("Set Up Game Data Again…",
             {false, {}, "Choose the disc image again, for example after moving it. The game closes first."}))
         confirm_ = Confirm::Setup;
+    texture_pack_data_rows();
 
     section("Text:");
     {

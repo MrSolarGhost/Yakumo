@@ -584,7 +584,55 @@ void test_mouse_turn() {
 
 } // namespace
 
+void test_wheel_bindings() {
+    using namespace mhp3rd::input;
+    check(
+        from_name("mouse wheel up") == kWheelUp && from_name(name(kWheelDown)) == kWheelDown, "wheel names round trip");
+    Slots parsed;
+    check(parse("Left Shift + Mouse Wheel Up / Mouse Wheel Down", parsed) && parsed[0] == chord(key(225), kWheelUp) &&
+            parsed[1] == single(kWheelDown),
+        "wheel chords parse and persist");
+    check(!valid(chord(kWheelUp, pad(PadInput::South))), "wheel and gamepad cannot share a chord");
+    WheelInput wheel;
+    wheel.push(0.25f);
+    wheel.update(100);
+    check(!wheel.held(kWheelUp), "fractional wheel input waits for a detent");
+    wheel.push(0.75f);
+    wheel.push(-1.0f);
+    wheel.update(101);
+    check(wheel.held(kWheelUp) && !wheel.held(kWheelDown) && !wheel.held(key(1)), "first detent presses only up");
+    wheel.update(150);
+    check(wheel.held(kWheelUp), "wheel pulse lasts long enough for a game frame");
+    wheel.update(151);
+    check(!wheel.held(kWheelUp) && !wheel.held(kWheelDown), "opposing detents have a release between them");
+    wheel.update(184);
+    check(!wheel.held(kWheelDown), "release spans a game frame");
+    wheel.update(185);
+    check(wheel.held(kWheelDown), "queued opposite detent retains its order");
+    wheel.reset();
+    wheel.update(200);
+    check(!wheel.held(kWheelDown), "focus/menu cancellation clears wheel presses and queued events");
+    wheel.push(std::nanf(""));
+    wheel.push(INFINITY);
+    wheel.update(201);
+    check(!wheel.held(kWheelUp), "non-finite wheel input is ignored");
+    wheel.push(1000000.0f);
+    int presses = 0;
+    for (std::uint64_t t = 300; t < 20000; t += 100) {
+        wheel.update(t);
+        if (wheel.held(kWheelUp)) ++presses;
+    }
+    check(presses == 64, "large wheel bursts are bounded");
+    Bindings bindings{};
+    bindings[static_cast<std::size_t>(Action::ItemRight)][0] = single(kWheelDown);
+    wheel.push(-1);
+    wheel.update(21000);
+    check(read(bindings, [&](Binding b) { return wheel.held(b); }).buttons == (0x100u | 0x2000u),
+        "a wheel binding produces the assigned PSP combination");
+}
+
 int main() {
+    test_wheel_bindings();
     test_names();
     test_settings_spelling();
     test_presets();

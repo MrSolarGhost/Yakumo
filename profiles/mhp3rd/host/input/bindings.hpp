@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <deque>
 #include <span>
 #include <string>
 #include <string_view>
@@ -78,6 +79,27 @@ using Binding = std::uint16_t;
 inline constexpr Binding kNone = 0u;
 inline constexpr Binding kMouse = 0x200u;
 inline constexpr Binding kPad = 0x300u;
+inline constexpr Binding kWheelUp = 0x210u;
+inline constexpr Binding kWheelDown = 0x211u;
+[[nodiscard]] constexpr int wheel_direction(Binding binding) {
+    return binding == kWheelUp ? 1 : binding == kWheelDown ? -1 : 0;
+}
+
+// Wheel detents become short presses separated by releases. Fractional motion
+// accumulates; a bounded queue preserves direction changes and multi-notch input.
+class WheelInput {
+public:
+    void push(float delta);
+    void update(std::uint64_t now_ms);
+    [[nodiscard]] bool held(Binding binding) const;
+    void reset();
+
+private:
+    std::deque<int> pending_;
+    float fraction_{};
+    int direction_{};
+    std::uint64_t until_{};
+};
 inline constexpr std::uint16_t kKeyPositions = 512u;
 
 // Gamepad inputs by place. The buttons have the values of SDL3's

@@ -86,7 +86,10 @@ struct TexturePackKey {
 // "0000000022585cbda625131a"
 [[nodiscard]] std::string format_texture_pack_key(const TexturePackKey &key);
 
-enum class TexturePackHash : std::uint8_t { Xxh32, Xxh64 };
+// The PSP and HD releases can share texture packs; explicit HD overrides take priority.
+[[nodiscard]] bool texture_pack_game_matches(const std::string &candidate, const std::string &game_id);
+
+enum class TexturePackHash : std::uint8_t { Xxh32, Xxh64, Quick };
 
 // What [options] says, plus the parts of the other sections that change a
 // texture's key.

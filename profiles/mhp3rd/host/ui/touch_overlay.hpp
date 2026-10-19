@@ -21,6 +21,7 @@ void draw_action_controls(const input::touch::ActionControls &controls, float op
 // One element of the action layout, for the game and for the editor: its
 // own icon, drawn in code, and the PSP buttons it presses beside it.
 struct ElementLook {
+    std::uint16_t directions{};
     float opacity{0.5f};
     bool held{};
     bool selected{}; // the editor's choice: an accent ring

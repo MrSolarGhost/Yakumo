@@ -297,8 +297,8 @@ void begin_panel(const char *id, const std::string &title, const std::string &su
     ImGui::Dummy({0.0f, px(10.0f)});
 }
 
-void begin_content() {
-    const float footer = std::round(font() * 4.3f);
+void begin_content(bool touch_footer) {
+    const float footer = std::round(font() * (touch_footer ? 5.5f : 4.3f));
     const float content = std::max(font() * 3.0f, ImGui::GetContentRegionAvail().y - footer);
     ImGui::BeginChild("content", {0.0f, content}, ImGuiChildFlags_NavFlattened);
 }
@@ -362,15 +362,19 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
     const float height = font() * 1.9f;
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
-    // The switch buttons at both ends.
-    const float cap_left =
-        draw_cap(draw, {start.x, start.y + (height - font()) * 0.5f}, pad ? shoulder_name(false) : "Q", false);
-    const float cap_right_width = ImGui::CalcTextSize(pad ? shoulder_name(true) : "W").x + font() * 0.7f;
-    draw_cap(draw, {start.x + width - std::max(font() * 1.15f, cap_right_width), start.y + (height - font()) * 0.5f},
-        pad ? shoulder_name(true) : "W", false);
-
-    const float inner_left = start.x + cap_left + px(14.0f);
-    const float inner_width = width - cap_left - std::max(font() * 1.15f, cap_right_width) - px(28.0f);
+    float inner_left = start.x;
+    float inner_width = width;
+    if (Layer::get().input_device() != InputDevice::Touch) {
+        // Touch navigation uses the tabs directly and needs no key caps.
+        const float cap_left =
+            draw_cap(draw, {start.x, start.y + (height - font()) * 0.5f}, pad ? shoulder_name(false) : "Q", false);
+        const float cap_right_width = ImGui::CalcTextSize(pad ? shoulder_name(true) : "W").x + font() * 0.7f;
+        draw_cap(draw,
+            {start.x + width - std::max(font() * 1.15f, cap_right_width), start.y + (height - font()) * 0.5f},
+            pad ? shoulder_name(true) : "W", false);
+        inner_left += cap_left + px(14.0f);
+        inner_width -= cap_left + std::max(font() * 1.15f, cap_right_width) + px(28.0f);
+    }
     float label_width = 0.0f;
     for (int i = 0; i < count; ++i) label_width = std::max(label_width, ImGui::CalcTextSize(labels[i]).x);
     const float tab_width = std::max(inner_width / static_cast<float>(std::min(count, 6)), label_width + px(24.0f));
@@ -384,7 +388,13 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
     ImGui::BeginChild("tab_strip", {inner_width, strip_height}, ImGuiChildFlags_None,
         ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
-    if (scrollable) {
+    ImGuiStorage *tab_state = ImGui::GetStateStorage();
+    const ImGuiID previous_id = ImGui::GetID("previous_tab");
+    const ImGuiID drag_id = ImGui::GetID("dragged_tabs");
+    const ImGuiID start_x_id = ImGui::GetID("drag_start_x");
+    const ImGuiID start_scroll_id = ImGui::GetID("drag_start_scroll");
+    // Automatic reveal follows selection changes, not every frame: manual scrolling stays put.
+    if (scrollable && tab_state->GetInt(previous_id, -1) != selected) {
         const float left = tab_width * static_cast<float>(selected);
         const float scroll = ImGui::GetScrollX();
         if (left < scroll)
@@ -392,12 +402,26 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
         else if (left + tab_width > scroll + inner_width)
             ImGui::SetScrollX(left + tab_width - inner_width);
     }
+    tab_state->SetInt(previous_id, selected);
     draw = ImGui::GetWindowDrawList();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     for (int i = 0; i < count; ++i) {
         ImGui::SetCursorPos({tab_width * static_cast<float>(i), 0.0f});
         ImGui::PushID(i);
-        if (ImGui::InvisibleButton("tab", {tab_width, height})) selected = i;
+        const bool pressed = ImGui::InvisibleButton("tab", {tab_width, height});
+        if (ImGui::IsItemActivated()) {
+            tab_state->SetBool(drag_id, false);
+            tab_state->SetFloat(start_x_id, ImGui::GetIO().MousePos.x);
+            tab_state->SetFloat(start_scroll_id, ImGui::GetScrollX());
+        }
+        if (scrollable && ImGui::IsItemActive() && ImGui::IsMouseDown(0)) {
+            const float distance = ImGui::GetIO().MousePos.x - tab_state->GetFloat(start_x_id);
+            if (std::abs(distance) >= ImGui::GetIO().MouseDragThreshold) tab_state->SetBool(drag_id, true);
+            if (tab_state->GetBool(drag_id))
+                ImGui::SetScrollX(
+                    std::clamp(tab_state->GetFloat(start_scroll_id) - distance, 0.0f, ImGui::GetScrollMaxX()));
+        }
+        if (pressed && !tab_state->GetBool(drag_id)) selected = i;
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
         const bool hovered = ImGui::IsItemHovered();

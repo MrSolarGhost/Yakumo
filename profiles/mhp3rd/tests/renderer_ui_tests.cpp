@@ -1638,6 +1638,23 @@ void input_capture_contracts(gpu::VulkanRenderer &renderer) {
     key(SDL_SCANCODE_ESCAPE, false);
     captured = layer.take_captured_binding();
     expect(captured && captured->inputs[0] == input::kNone, "escape cancels key capture");
+    for (const auto direction : {SDL_MOUSEWHEEL_NORMAL, SDL_MOUSEWHEEL_FLIPPED}) {
+        layer.begin_binding_capture();
+        key(SDL_SCANCODE_LCTRL, true);
+        SDL_Event wheel{};
+        wheel.type = SDL_EVENT_MOUSE_WHEEL;
+        wheel.wheel.windowID = SDL_GetWindowID(renderer.window());
+        wheel.wheel.which = 1;
+        wheel.wheel.y = 1;
+        wheel.wheel.direction = direction;
+        expect(SDL_PushEvent(&wheel), "wheel capture event queues");
+        renderer.pump_events();
+        captured = layer.take_captured_binding();
+        expect(captured && captured->inputs[0] == input::key(SDL_SCANCODE_LCTRL) &&
+                captured->inputs[1] == (direction == SDL_MOUSEWHEEL_NORMAL ? input::kWheelUp : input::kWheelDown),
+            "wheel capture respects direction and keyboard modifiers");
+        key(SDL_SCANCODE_LCTRL, false);
+    }
     layer.begin_binding_capture(ui::Layer::Capture::Pad);
     expect(
         layer.capture_seconds_left() <= 6 && layer.capture_seconds_left() > 0 && layer.capture_cancel_progress() == 0,
@@ -2220,8 +2237,10 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
         ui::texture_pack_import_tick();
         if (ui::texture_pack_screen_open())
             ui::texture_pack_screen(back);
-        else
+        else {
             ui::texture_pack_rows();
+            ui::texture_pack_data_rows();
+        }
         const bool found = focus && GImGui->NavId == focus && GImGui->NavIdIsAlive;
         ui::begin_footer();
         ui::hints({{ui::Control::Confirm, "Choose"}, {ui::Control::Back, "Back"}});
@@ -2334,6 +2353,37 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
     expect(!ui::texture_pack_screen_open(), "cancel closes rejected texture review");
     expect(settings::current().texture_pack_folder.empty() && settings::current().texture_pack,
         "invalid import leaves successful installed selection intact");
+    auto removal = [&] {
+        frame(false, "Remove Installed Texture Pack…");
+        press(ImGuiKey_Space);
+        frame();
+        expect(ui::texture_pack_screen_open() && !ui::texture_pack_import_busy(),
+            "pack removal requires confirmation before doing work");
+    };
+    removal();
+    frame(false, "Cancel");
+    press(ImGuiKey_Space);
+    expect(!ui::texture_pack_screen_open() && std::filesystem::exists(sandbox / "textures" / "NPJB40001" / "red.png"),
+        "cancelling removal preserves installed files");
+    settings::current().texture_pack_folder = pack.string();
+    renderer.reload_texture_pack();
+    removal();
+    frame(false, "Remove Installed Texture Pack");
+    press(ImGuiKey_Space);
+    for (int settle = 0; settle < 100 && ui::texture_pack_import_busy(); ++settle) {
+        SDL_Delay(5);
+        frame();
+    }
+    frame();
+    expect(!ui::texture_pack_import_busy() && !std::filesystem::exists(sandbox / "textures" / "NPJB40001") &&
+            !renderer.texture_pack_held(),
+        "confirmed removal completes and releases the renderer hold");
+    expect(std::filesystem::is_regular_file(pack / "red.png") &&
+            std::filesystem::is_directory(sandbox / "textures" / ".backup") &&
+            settings::current().texture_pack_folder == pack.string() && renderer.texture_pack_folder() == pack.string(),
+        "removal keeps external pack selected and preserves backups");
+    frame(true);
+    settings::current().texture_pack_folder.clear();
     settings::current().texture_pack = false;
     renderer.set_texture_pack(false);
     layer.set_interactive(false);
@@ -3097,6 +3147,10 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     player.touch_psp = input::touch::default_psp_layout();
     player.touch_dpad = true;
     renderer.set_game_input(true);
+    // Drain editor/window events before deriving the first synthetic finger's coordinates.
+    renderer.pump_events();
+    renderer.present_ui(true);
+    renderer.pump_events();
     int width{}, height{};
     expect(SDL_GetWindowSize(renderer.window(), &width, &height), "touch fixture reads real SDL window dimensions");
     auto finger = [&](SDL_EventType type, std::uint64_t id, input::touch::Point at) {
@@ -3206,6 +3260,22 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     draw_overlay();
     finger(SDL_EVENT_FINGER_UP, 4, attack);
     expect(!renderer.action_touch_controls().held(input::touch::Element::Attack), "action attack releases on up");
+    const bool psp_visibility = player.touch_dpad;
+    const auto action_toggle = renderer.action_touch_controls().placed(input::touch::Element::DpadToggle).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 50, action_toggle);
+    finger(SDL_EVENT_FINGER_UP, 50, action_toggle);
+    expect(player.touch_action.at(input::touch::Element::DPad).shown && player.touch_dpad == psp_visibility,
+        "Action screen toggle updates only its own saved visibility");
+    auto action_dpad = renderer.action_touch_controls().placed(input::touch::Element::DPad);
+    const input::touch::Point right{action_dpad.centre.x + action_dpad.radius * 0.7f, action_dpad.centre.y};
+    finger(SDL_EVENT_FINGER_DOWN, 51, right);
+    expect((renderer.pad().buttons & 0xf0) == 0x20, "Action D-pad reaches the real PSP pad state");
+    draw_overlay();
+    finger(SDL_EVENT_FINGER_DOWN, 50, action_toggle);
+    finger(SDL_EVENT_FINGER_UP, 50, action_toggle);
+    expect(!player.touch_action.at(input::touch::Element::DPad).shown && (renderer.pad().buttons & 0xf0) == 0,
+        "hiding Action D-pad releases directions immediately");
+    finger(SDL_EVENT_FINGER_UP, 51, right);
     player.controls = input::layout(input::Preset::Default);
     const auto action_r3 = renderer.action_touch_controls().placed(input::touch::Element::R3).centre;
     finger(SDL_EVENT_FINGER_DOWN, 30, action_r3);
@@ -3372,6 +3442,34 @@ void scripted_mouse_contracts(gpu::VulkanRenderer &renderer) {
     motion(gpu::kScriptedMouse, 50, 60);
     const auto ungrabbed = renderer.take_mouse_motion();
     expect(ungrabbed.x == 0 && ungrabbed.y == 0, "uncaptured scripted mouse motion does not reach game");
+    renderer.set_pointer_free(false);
+    renderer.pump_events();
+    player.controls.keys[static_cast<int>(input::Action::Circle)][0].inputs[0] = input::kWheelUp;
+    player.controls.keys[static_cast<int>(input::Action::Cross)][0].inputs[0] = input::kWheelDown;
+    auto wheel = [&](std::uint32_t device, float delta) {
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_WHEEL;
+        event.wheel.windowID = SDL_GetWindowID(renderer.window());
+        event.wheel.which = device;
+        event.wheel.y = delta;
+        SDL_PushEvent(&event);
+        renderer.pump_events();
+        renderer.sample_pad();
+    };
+    wheel(0, 1);
+    expect((renderer.pad().buttons & 0x6000) == 0, "scripted input ignores physical wheel events");
+    wheel(gpu::kScriptedMouse, 1);
+    expect((renderer.pad().buttons & 0x6000) == 0x2000, "wheel up reaches its PSP Circle binding");
+    SDL_Delay(60);
+    renderer.sample_pad();
+    expect((renderer.pad().buttons & 0x6000) == 0, "wheel pulse releases without another event");
+    SDL_Delay(40);
+    wheel(gpu::kScriptedMouse, -1);
+    expect((renderer.pad().buttons & 0x6000) == 0x4000, "wheel down reaches its PSP Cross binding");
+    renderer.set_pointer_free(true);
+    renderer.pump_events();
+    renderer.sample_pad();
+    expect((renderer.pad().buttons & 0x6000) == 0, "releasing pointer clears wheel bindings");
     renderer.set_game_input(false);
     renderer.set_scripted_input(false);
     renderer.set_pointer_free(false);
@@ -3937,6 +4035,277 @@ void setup_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem
     expect(wrapper_error, "public progress wrapper preserves failure and restores interaction mode");
     renderer.pump_events();
     layer.set_interactive(false);
+}
+
+void tab_drag_contracts(gpu::VulkanRenderer &renderer) {
+    auto &layer = ui::Layer::get();
+    layer.set_interactive(true);
+    ScriptedUiMouse mouse(renderer.window());
+    int selected = 0;
+    ImGuiWindow *strip{};
+    auto frame = [&] {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        ui::begin_panel("##drag-tabs", "Tabs", "", true);
+        const char *labels[] = {"Video", "Audio", "Controls", "Network", "QoL", "Mods", "System"};
+        ui::tab_bar(labels, 7, selected);
+        for (auto *window : ImGui::GetCurrentContext()->Windows)
+            if (std::string_view(window->Name).find("##drag-tabs/tab_strip") != std::string_view::npos) strip = window;
+        ui::end_panel();
+        layer.end_frame();
+        renderer.present_ui(false);
+    };
+    auto &io = ImGui::GetIO();
+    for (const auto source : {ImGuiMouseSource_Mouse, ImGuiMouseSource_TouchScreen}) {
+        frame();
+        frame();
+        expect(strip && strip->ScrollMax.x > 0, "tab drag fixture overflows");
+        if (!strip) break;
+        ImGui::SetScrollX(strip, 0);
+        frame();
+        const ImVec2 point{strip->Pos.x + strip->Size.x * 0.65f, strip->Pos.y + ImGui::GetFontSize() * 0.7f};
+        io.AddMouseSourceEvent(source);
+        io.AddMousePosEvent(point.x, point.y);
+        frame();
+        io.AddMouseButtonEvent(0, true);
+        frame();
+        io.AddMousePosEvent(point.x - 80, point.y);
+        frame();
+        frame();
+        const float dragged = strip->Scroll.x;
+        expect(dragged > 0, "dragging a tab scrolls the strip with mouse or touch");
+        io.AddMouseButtonEvent(0, false);
+        frame();
+        frame();
+        expect(
+            selected == 0 && strip->Scroll.x == dragged, "drag release neither selects a tab nor snaps scrolling back");
+    }
+    selected = 6;
+    frame();
+    frame();
+    expect(strip && strip->Scroll.x > 0, "selection changes still reveal the last tab");
+    io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+    layer.set_interactive(false);
+}
+
+void touch_menu_footer_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    auto &layer = ui::Layer::get();
+    auto &io = ImGui::GetIO();
+    const auto flags = io.ConfigFlags;
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    ScriptedUiMouse mouse(renderer.window());
+    auto event = [&](SDL_Event input) {
+        expect(SDL_PushEvent(&input), "touch footer input event queues");
+        renderer.pump_events();
+    };
+    auto keyboard = [&] {
+        SDL_Event input{};
+        input.type = SDL_EVENT_KEY_DOWN;
+        input.key.windowID = SDL_GetWindowID(renderer.window());
+        input.key.scancode = SDL_SCANCODE_F10;
+        input.key.key = SDLK_F10;
+        input.key.down = true;
+        event(input);
+        input.type = SDL_EVENT_KEY_UP;
+        input.key.down = false;
+        event(input);
+    };
+    auto touch = [&] {
+        SDL_Event input{};
+        input.type = SDL_EVENT_FINGER_DOWN;
+        input.tfinger.windowID = SDL_GetWindowID(renderer.window());
+        input.tfinger.touchID = 1;
+        input.tfinger.fingerID = 90;
+        input.tfinger.x = 0.5f;
+        input.tfinger.y = 0.05f;
+        event(input);
+        input.type = SDL_EVENT_FINGER_UP;
+        event(input);
+    };
+    bool focus_close = true;
+    auto frame = [&] {
+        mouse.prepare_frame();
+        if (focus_close && ui::menu_over_game())
+            if (auto *window = ImGui::FindWindowByName("##menu")) {
+                ImGui::FocusWindow(window);
+                ImGui::SetFocusID(window->GetID("Close Menu##touch_close_menu"), window);
+            }
+        ui::draw_over_game();
+        renderer.present_ui(true);
+    };
+    auto footer = [&] {
+        auto *window = ImGui::FindWindowByName("##menu");
+        return window && GImGui->NavId == window->GetID("Close Menu##touch_close_menu") && GImGui->NavIdIsAlive;
+    };
+    auto touch_tabs = [&] {
+        auto *window = ImGui::FindWindowByName("##menu");
+        const ImGuiWindow *strip{};
+        for (const auto *candidate : GImGui->Windows)
+            if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos) strip = candidate;
+        if (!window || !strip) return false;
+        return std::abs(strip->Pos.x - window->WorkRect.Min.x) < 1.0f &&
+            std::abs(strip->Size.x - window->WorkRect.GetWidth()) < 1.0f;
+    };
+    keyboard();
+    ui::open_menu_over_game();
+    frame();
+    frame();
+    expect(layer.input_device() == ui::InputDevice::Keyboard && !footer() && !touch_tabs(),
+        "keyboard menu retains its ordinary footer without a touch close button");
+    touch();
+    frame();
+    frame();
+    expect(layer.input_device() == ui::InputDevice::Touch && footer() && touch_tabs(),
+        "SDL fingers replace footer hints with Close Menu and remove the tab key caps");
+    auto *window = ImGui::FindWindowByName("##menu");
+    ImRect button = window ? window->NavRectRel[ImGuiNavLayer_Main] : ImRect{};
+    if (window) button.Translate(window->Pos);
+    expect(window && button.GetCenter().x > window->Pos.x + window->Size.x * 0.75f &&
+            button.Max.x <= window->InnerRect.Max.x && button.Max.y <= window->InnerRect.Max.y &&
+            button.GetHeight() >= layer.font_size() * 2.0f,
+        "touch close button fits at the bottom right with a full touch-sized hit area");
+    renderer.capture_window(sandbox / "touch-menu-footer.bmp");
+    for (int i = 0; i < 3 && renderer.window_capture_pending(); ++i) frame();
+    expect(std::filesystem::is_regular_file(sandbox / "touch-menu-footer.bmp"),
+        "touch menu footer is captured from the actual Vulkan window");
+    SDL_Event pointer{};
+    pointer.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    pointer.button.windowID = SDL_GetWindowID(renderer.window());
+    pointer.button.which = gpu::kScriptedMouse;
+    pointer.button.button = SDL_BUTTON_LEFT;
+    pointer.button.down = true;
+    pointer.button.x = window ? window->Pos.x + 8 : 8;
+    pointer.button.y = window ? window->Pos.y + 8 : 8;
+    event(pointer);
+    pointer.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    pointer.button.down = false;
+    event(pointer);
+    frame();
+    frame();
+    expect(layer.input_device() == ui::InputDevice::Keyboard && !footer() && !touch_tabs(),
+        "a real mouse press restores keyboard/mouse hints");
+    touch();
+    frame();
+    frame();
+    keyboard();
+    frame();
+    frame();
+    expect(layer.input_device() == ui::InputDevice::Keyboard && !footer() && !touch_tabs(),
+        "a keyboard press restores keyboard hints after touch");
+    touch();
+    frame();
+    frame();
+    SDL_Event pad{};
+    pad.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    pad.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+    pad.gaxis.value = 20000;
+    event(pad);
+    frame();
+    frame();
+    expect(layer.input_device() == ui::InputDevice::Gamepad && !footer() && !touch_tabs(),
+        "gamepad navigation restores gamepad hints after touch");
+    touch();
+    frame();
+    frame();
+    auto point = [&](ImVec2 at) {
+        SDL_Event motion{};
+        motion.type = SDL_EVENT_MOUSE_MOTION;
+        motion.motion.windowID = SDL_GetWindowID(renderer.window());
+        motion.motion.which = SDL_TOUCH_MOUSEID;
+        motion.motion.x = at.x;
+        motion.motion.y = at.y;
+        event(motion);
+    };
+    auto press = [&](bool down, ImVec2 at) {
+        SDL_Event input{};
+        input.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+        input.button.windowID = SDL_GetWindowID(renderer.window());
+        input.button.which = SDL_TOUCH_MOUSEID;
+        input.button.button = SDL_BUTTON_LEFT;
+        input.button.down = down;
+        input.button.x = at.x;
+        input.button.y = at.y;
+        event(input);
+    };
+    auto consume = [&] {
+        for (unsigned settle = 0; settle < 16; ++settle) {
+            frame();
+            if (GImGui->InputEventsQueue.empty()) return;
+        }
+        expect(false, "touch footer input settles within sixteen frames");
+    };
+    ImRect current_button = window ? window->NavRectRel[ImGuiNavLayer_Main] : ImRect{};
+    if (window) current_button.Translate(window->Pos);
+    const ImVec2 centre = current_button.GetCenter();
+    const ImVec2 outside{centre.x - 200, centre.y};
+    point(centre);
+    consume();
+    press(true, centre);
+    consume();
+    expect(window && GImGui->ActiveId == window->GetID("Close Menu##touch_close_menu"),
+        "the actual touch close button owns the drag's initial press");
+    point(outside);
+    consume();
+    press(false, outside);
+    consume();
+    expect(ui::menu_over_game() && layer.input_device() == ui::InputDevice::Touch,
+        "dragging off the touch button cancels closing and emulated mouse input retains touch mode");
+    point(centre);
+    consume();
+    press(true, centre);
+    consume();
+    expect(window && GImGui->ActiveId == window->GetID("Close Menu##touch_close_menu"),
+        "the actual touch close button owns the tap's press");
+    press(false, centre);
+    consume();
+    expect(!ui::menu_over_game() && !ui::take_quit_request(),
+        "a touch tap closes the menu and resumes the game without quitting");
+    keyboard();
+    // Later pointer fixtures inject ordinary mouse positions/buttons directly.
+    // Finish the touch source change and pending key releases before they run.
+    io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+    io.AddMousePosEvent(-100, -100);
+    for (unsigned settle = 0; settle < 16; ++settle) {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        layer.end_frame();
+        renderer.present_ui(false);
+        if (GImGui->InputEventsQueue.empty()) break;
+    }
+    expect(io.MouseSource == ImGuiMouseSource_Mouse && GImGui->InputEventsQueue.empty(),
+        "touch footer fixture restores ordinary mouse input and drains key releases");
+    io.ConfigFlags = flags;
+    focus_close = false;
+    ui::open_menu_over_game();
+    frame();
+    frame();
+    auto selected_tab = [&] {
+        for (auto *candidate : GImGui->Windows)
+            if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos)
+                return candidate->StateStorage.GetInt(candidate->GetID("previous_tab"), -1);
+        return -1;
+    };
+    const int before = selected_tab();
+    io.AddKeyEvent(ImGuiKey_W, true);
+    consume();
+    io.AddKeyEvent(ImGuiKey_W, false);
+    consume();
+    expect(ui::menu_over_game() && !footer() && !touch_tabs() && selected_tab() == (before + 1) % 7,
+        "reopening after a touch close restores keyboard tab navigation and ordinary hints");
+    SDL_Event escape{};
+    escape.type = SDL_EVENT_KEY_DOWN;
+    escape.key.windowID = SDL_GetWindowID(renderer.window());
+    escape.key.scancode = SDL_SCANCODE_ESCAPE;
+    escape.key.key = SDLK_ESCAPE;
+    escape.key.down = true;
+    event(escape);
+    escape.type = SDL_EVENT_KEY_UP;
+    escape.key.down = false;
+    event(escape);
+    SDL_Delay(120);
+    frame();
+    frame();
+    expect(!ui::menu_over_game(), "keyboard Escape still closes a menu reopened after touch");
 }
 
 void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false) {
@@ -5532,6 +5901,7 @@ int run_contracts(int scripts) {
     }
     if (scripts == 7) {
         render_contracts(renderer);
+        touch_menu_footer_contracts(renderer, sandbox);
         touch_editor_contracts(renderer);
         touch_event_contracts(renderer);
         auto &player = settings::current();
@@ -5623,6 +5993,7 @@ int run_contracts(int scripts) {
     file_browser_boundary_contracts(renderer, sandbox);
     focused_widget_contracts(renderer);
     font_menu_contracts(renderer, sandbox);
+    tab_drag_contracts(renderer);
     menu_contracts(renderer);
     setup_screen_contracts(renderer, sandbox);
     texture_pack_screen_contracts(renderer, sandbox);

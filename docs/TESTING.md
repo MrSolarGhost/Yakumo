@@ -249,7 +249,7 @@ checks. List unavailable modes/devices and skipped scenarios explicitly.
 
 ### Texture pack import (#49)
 
-`mhp3rd_texture_pack_tests` (CTest) checks the import without game data or a window: finding a pack in each layout (the pack folder, `textures/NPJB40001`, `NPJB40001`, `PSP/TEXTURES/NPJB40001`, in any case), a pack named for `ULJM05800` taken only when its `[games]` lists `NPJB40001`, `quick` and hashless packs refused, zipped packs refused with "unpack it first", key, image, size and missing-image counts, the copy into a staging folder, the swap that moves the old pack to `textures/.backup/<date>_<time>/NPJB40001`, cancelling, and where the pack is read from with `MHP3RD_TEXTURE_PACK` and a pack used in place. `mhp3rd_texture_pack_tests --check <folder>` prints what the menu would find in a real folder and reads nothing else.
+`mhp3rd_texture_pack_tests` (CTest) checks the import without game data or a window: finding a pack in each layout (the pack folder, `textures/NPJB40001`, `NPJB40001`, `PSP/TEXTURES/NPJB40001`, in any case), compatible `ULJM05800` packs and exact-release override priority, legacy `quick` keys accepted and hashless packs refused, zipped packs refused with "unpack it first", key, image, size and missing-image counts, the copy into a staging folder, the swap that moves the old pack to `textures/.backup/<date>_<time>/NPJB40001`, cancelling, and where the pack is read from with `MHP3RD_TEXTURE_PACK` and a pack used in place. `mhp3rd_texture_pack_tests --check <folder>` prints what the menu would find in a real folder and reads nothing else.
 
 For the manual check, use a throwaway data folder (`MHP3RD_DATA_DIR`, with a copy of `settings.ini`, `EBOOT.ELF` and the disc image) and a real pack, then in **Video**:
 
@@ -520,3 +520,15 @@ The public Python suite discovers synthetic runner contracts without game data
 or cloud access. Hardware/gameplay and human checks remain explicit evidence
 gaps. Final release packages use the normal-player checklist; developer quest
 shortcuts are diagnostic only.
+
+### Small fixes (#320)
+
+- `mhp3rd_texture_pack_tests`: legacy `quick` hash vectors and row boundaries, compatible PSP/HD game mappings and override priority, arbitrary selected folder names, rejection of unrelated game lists, and installed-pack deletion with preservation of saves, backups and external folders. A linked installed directory is rejected where the platform permits creating a test symlink.
+- `mhp3rd_input_tests`: mouse-wheel binding names/chords, fractional steps, opposite directions, bounded queues, invalid deltas and release/reset timing. Renderer/UI tests also capture actual SDL wheel events with modifiers and flipped direction.
+- `mhp3rd_touch_tests`: Action D-pad show/hide, direction changes, simultaneous attack input, hidden-direction release and edit-time visibility. Both touch editors still use their independent saved layouts.
+- `mhp3rd_renderer_ui_tests`: cancelling and confirming pack removal, renderer hold/reload and external-pack preservation; mouse and touch tab dragging without accidental selection or automatic snap-back.
+- Manual: import a legacy `quick` pack and a compatible `ULJM05800` pack, inspect known replaced textures, remove only the installed copy and restart. Bind wheel directions to gameplay actions and try individual and rapid steps. On Android, toggle and reposition the Action D-pad while holding another control, restart to check visibility persistence, and drag the menu tabs in both orientations. Synthetic tests do not establish actual Android touch or haptic behavior.
+
+The font-spacing contracts in `mhp3rd_kernel_hle_tests` use an independently authored narrow glyph with Latin, Cyrillic and Japanese mappings. They verify wider half-width ink, unchanged full-width metrics/line height, cell bounds, bitmap/metric agreement, Sharp Text cell generation and the diagnostic opt-out. Manual comparisons must use the same font, text, internal resolution and game frame.
+
+- Touch menu footer: real SDL finger and touch-emulated mouse events replace the menu's bottom key hints with a bottom-right Close Menu button and hide the tab-switch caps, allowing the tab strip to fill the row. Renderer/UI contracts verify its bounds, cancelled drags, tap-to-resume, and restoration of keyboard/mouse/gamepad hints. The touch UI mode retains a window capture for inspection. Actual Android display and input hardware remain a manual check.

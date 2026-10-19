@@ -328,6 +328,8 @@ struct State {
     std::string problem;
     int bold{};
     int baseline{kBaseline}; // row of the cell the baselines are on
+    bool original_spacing{};
+    bool original_cyrillic_width{};
     std::unordered_map<std::uint32_t, Layout> layouts;
     std::unordered_map<std::uint64_t, GlyphBitmap> bitmaps;
     std::atomic<std::uint64_t> generation{};
@@ -343,6 +345,8 @@ void load(State &s) {
     s.chosen.reset();
     s.problem.clear();
     s.bold = static_cast<int>(settings::current().font_weight);
+    s.original_spacing = std::getenv("MHP3RD_ORIGINAL_FONT_SPACING") != nullptr;
+    s.original_cyrillic_width = std::getenv("MHP3RD_ORIGINAL_TEXT_WIDTH") != nullptr;
     std::string error;
     if (!s.fallback) {
         for (const char *candidate : kFontCandidates) {
@@ -433,14 +437,28 @@ Layout lay_out(State &s, std::uint32_t code) {
             static_cast<float>(kMaxHeight) / static_cast<float>(std::max(height, 1)));
         scale *= std::min(fit, 0.97f);
     }
-    layout.scale_x = scale;
     layout.scale_y = scale;
+    // Traced on Windows: Latin ink occupies 9 of 20 cell pixels, then the
+    // game squeezes that entire cell into a half-width advance. Compensate
+    // for that second horizontal shrink while preserving the font's relative
+    // letter widths, baseline and the game's string measurements.
+    const bool original_cyrillic = s.original_cyrillic_width && code >= 0x0400u && code <= 0x052fu;
+    float scale_x = scale;
+    if (!s.original_spacing && !original_cyrillic && character_class(code) == 1u && code < 0xfff0u) {
+        scale_x *= 2.0f;
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            stbtt_GetGlyphBitmapBox(&face.info, layout.glyph, scale_x, scale, &x0, &y0, &x1, &y1);
+            if (x1 - x0 <= kMaxWidth) break;
+            scale_x *= std::min(static_cast<float>(kMaxWidth) / static_cast<float>(x1 - x0), 0.97f);
+        }
+    }
+    layout.scale_x = scale_x;
     layout.natural_x0 = x0;
     layout.natural_y0 = y0;
     m.width = std::max(x1 - x0, 0);
     m.height = std::max(y1 - y0, 0);
     if (m.width > 0) m.width += layout.bold;
-    m.advance = static_cast<float>(advance) * scale;
+    m.advance = static_cast<float>(advance) * scale_x;
     if (m.width == 0 || m.height == 0) {
         m.width = m.height = 0;
         m.left = 0;
@@ -571,6 +589,15 @@ void embolden(GlyphBitmap &bitmap, int columns) {
 }
 
 } // namespace
+
+std::uint32_t character_class(std::uint32_t code) {
+    code &= 0xFFFFu;
+    // Cyrillic and its supplement use the same cell layout as Latin letters.
+    if (code >= 0x0400u && code <= 0x052Fu) return 1u;
+    if (code < 0x0250u || (code >= 0x20A0u && code <= 0x20CFu) || code >= 0xFFF0u) return 1u;
+    if (code >= 0xFF60u && code <= 0xFFDFu) return 2u;
+    return 0u;
+}
 
 bool ready() {
     const State &s = loaded_state();

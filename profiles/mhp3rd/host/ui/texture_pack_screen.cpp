@@ -36,7 +36,7 @@ using gpu::TexturePackCheck;
 using gpu::TexturePackCopy;
 using gpu::TexturePackLocation;
 
-enum class Stage { Closed, Choose, Documents, Checking, Review, Copying, Result };
+enum class Stage { Closed, Choose, Documents, Checking, Review, Copying, ConfirmRemoval, Removing, Result };
 
 // What the review screen shows: the pack found, and the one in use now.
 struct Review {
@@ -50,6 +50,7 @@ struct Review {
 struct Outcome {
     bool ok{};
     bool in_place{};
+    bool removed{};
     bool cancelled{};
     std::string error;
     fs::path folder; // where the pack is read from now
@@ -66,6 +67,7 @@ struct State {
     android::FolderImport document_import;
 #endif
     std::future<Review> checking;
+    std::future<Outcome> removing;
     fs::path checking_folder;
     bool cancel_requested{};
     Review review;
@@ -359,7 +361,10 @@ void review_screen(bool back) {
         info_row("Folder", utf8(c.folder));
         if (c.keys > 0u) {
             info_row("Textures",
-                count(c.keys, "key", "keys") + ", hash " + (c.hash == gpu::TexturePackHash::Xxh64 ? "xxh64" : "xxh32") +
+                count(c.keys, "key", "keys") + ", hash " +
+                    (c.hash == gpu::TexturePackHash::Quick          ? "quick"
+                            : c.hash == gpu::TexturePackHash::Xxh64 ? "xxh64"
+                                                                    : "xxh32") +
                     (c.ignore_address ? ", addresses ignored" : ""));
             info_row("Images",
                 count(c.images, "file", "files") + ", " + human_size(c.bytes) + " in all " +
@@ -463,6 +468,32 @@ void copying_screen(bool back) {
     }
 }
 
+void removal_screen(bool back) {
+    State &s = state();
+    if (s.stage == Stage::Removing) {
+        section("Removing Texture Pack:");
+        indented("Removing the installed copy. Please wait until this finishes.");
+        return;
+    }
+    if (back) {
+        close();
+        return;
+    }
+    section("Remove Installed Texture Pack:");
+    indented("Permanently remove the texture pack installed in Yakumo's data folder?");
+    indented("Your game, saves, pack backups and external pack folders will be kept.");
+    focus_first();
+    if (button_row("Cancel", {false, {}, "Keep the installed texture pack."})) {
+        close();
+        return;
+    }
+    if (button_row("Remove Installed Texture Pack", {false, {}, "Delete the installed texture pack files."},
+            colors::kDanger)) {
+        renderer().hold_texture_pack(true);
+        go(Stage::Removing);
+    }
+}
+
 void result_screen(bool back) {
     State &s = state();
     if (back) {
@@ -470,8 +501,10 @@ void result_screen(bool back) {
         return;
     }
     const Outcome &o = s.outcome;
-    section("Import texture pack");
-    if (o.ok) {
+    section(o.removed ? "Remove Texture Pack:" : "Import texture pack");
+    if (o.removed) {
+        info_row(o.ok ? "Removed" : "Removal Failed", o.ok ? "The installed texture pack was removed." : o.error);
+    } else if (o.ok) {
         info_row("Installed", count(o.keys, "texture", "textures") + (o.in_place ? ", used where it is" : ""));
         info_row(o.in_place ? "Used from" : "Installed in", utf8(o.folder));
         if (!o.backup.empty()) info_row("Replaced pack", "Kept in " + utf8(o.backup));
@@ -498,6 +531,30 @@ void result_screen(bool back) {
 // pack is closed, the folders swap, and the new pack opens.
 void tick() {
     State &s = state();
+    if (s.stage == Stage::Removing) {
+        if (!renderer().texture_pack_held()) return;
+        if (!s.removing.valid()) {
+            s.removing = std::async(std::launch::async, [root = textures_root()] {
+                Outcome outcome;
+                outcome.removed = true;
+                outcome.ok = gpu::remove_installed_texture_pack(root, install::kDiscId, outcome.error);
+                return outcome;
+            });
+            return;
+        }
+        if (s.removing.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+        Outcome outcome;
+        outcome.removed = true;
+        try {
+            outcome = s.removing.get();
+        } catch (const std::exception &e) {
+            outcome.error = e.what();
+        }
+        renderer().hold_texture_pack(false);
+        renderer().reload_texture_pack();
+        finish(std::move(outcome));
+        return;
+    }
     if (s.stage != Stage::Copying) return;
     switch (s.copy.state()) {
     case TexturePackCopy::State::Copying:
@@ -583,12 +640,23 @@ void texture_pack_rows() {
     }
 }
 
+void texture_pack_data_rows() {
+    std::error_code ec;
+    const bool installed = fs::is_directory(installed_folder(), ec);
+    if (button_row("Remove Installed Texture Pack…",
+            {!installed, {},
+                installed ? "Remove the texture pack copied into Yakumo's data folder. Asks for confirmation."
+                          : "No texture pack is installed in the data folder."},
+            colors::kDanger))
+        go(Stage::ConfirmRemoval);
+}
+
 bool texture_pack_screen_open() {
     return state().stage != Stage::Closed;
 }
 
 bool texture_pack_import_busy() {
-    return state().stage == Stage::Copying || state().stage == Stage::Documents;
+    return state().stage == Stage::Copying || state().stage == Stage::Documents || state().stage == Stage::Removing;
 }
 
 bool texture_pack_screen(bool back) {
@@ -611,6 +679,10 @@ bool texture_pack_screen(bool back) {
         break;
     case Stage::Copying:
         copying_screen(back);
+        break;
+    case Stage::ConfirmRemoval:
+    case Stage::Removing:
+        removal_screen(back);
         break;
     case Stage::Result:
         result_screen(back);
