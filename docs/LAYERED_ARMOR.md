@@ -119,6 +119,51 @@ showed on leaving it; a change made just before departing showed on the
 quest; turning the feature off in the village showed the real armor on
 entering the Guild Hall.
 
+## Smithy previews
+
+The Smithy preview copies the live hunter's model buffers, loaded file ids and
+cached model numbers, including its layered appearance. Selecting another piece
+updates and reparses that part. A later load pass asks for all its files again,
+but its original file lookup uses the equipment ids, which still describe the
+real armor for the other parts. Replacing those buffers with different models
+leaves the preview's geometry pointers referring to the previous layout.
+
+This was traced in a Windows hang while switching Smithy armor categories with
+layered armor on: a copied chest model and the subsequently loaded chest file
+differed, and the GE called vertex data instead of a display sublist. The guest
+then waited indefinitely for the missing GE finish callback. Changing a layered
+piece immediately before opening the Smithy was not required to reproduce it.
+
+The host wraps the existing part-buffer copy at `0x088A5324`, only for the
+preview constructor returning to `0x0A10ECF8`. The constructor keeps the source
+hunter in `s3`; `a0` is the preview and `a1` its part. For a loaded layered piece,
+the host checks that its model agrees with the source hunter's actual cached
+model, then sets the appearance id in the preview's current record
+(`+0x4A2 + 16 * part`) and file-request record (`+0x1452 + 12 * part`).
+The copied buffers, file ids and model numbers then describe the same appearance.
+Only these private preview ids change; character, equipment box, save and network
+records remain untouched.
+
+All subsequent selection, model lookup, loading and parsing use the original
+code. In particular, the request for a selected piece precedes its cached-model
+update. Returning that old cached model from the file lookup was tried and
+rejected: it prevented the hang but froze the preview. Selecting even the real
+worn piece must load its actual model, independently of the layered appearance.
+
+The caller, source hunter, destination vtable and overlay instructions are
+validated before touching the preview. The guard remains installed after the
+feature is turned off because the source can retain its previously loaded look
+until another scene load. `MHP3RD_LAYERED_PREVIEW_FIX=0` disables the guard at
+launch for comparisons. Overlay binaries and generated source are unchanged.
+
+Synthetic equipment-model tests exercise both sexes, all five armor parts,
+selection before cache update, empty armor, unchanged player data and unsupported
+objects/code. The user reported normal Windows performance after the temporary diagnostic
+packet collection was removed. The user confirmed the revised constructor fix works in Windows gameplay:
+Smithy preview selection works without the reproduced hang. The log confirms
+the copy guard ran and the game stopped via its menu. Android validation remains
+pending; this Windows result does not establish behavior on other platforms.
+
 ## Multiplayer: what other players see
 
 Other players see the real armor. Each game draws the other hunters from its

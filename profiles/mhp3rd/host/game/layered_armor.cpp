@@ -30,6 +30,41 @@ std::optional<std::uint16_t> replacement_model(const Ram &ram, std::uint32_t blo
     return armor_model(ram, kind, id, sex);
 }
 
+bool prepare_preview_copy(Ram &ram, std::uint32_t caller, std::uint32_t preview,
+    std::uint32_t source, std::uint32_t part, const Pieces &loaded) {
+    if (caller != kPreviewCopyReturn || part >= kParts || preview == source ||
+        !ram.contains(preview, kPreviewRequestedEquipment + kParts * 12u) ||
+        !own_hunter(ram, source)) return false;
+    const auto vtable = ram.load32(preview);
+    if (!ram.contains(vtable, kFileFunctionSlot + 4u) ||
+        ram.load32(vtable + kFileFunctionSlot) != kPreviewFileFunction) return false;
+    // The overlay slot is replaceable. Validate the copy call and the following
+    // transfers of loaded file ids and model numbers from the source hunter.
+    if (!ram.contains(0x0A10ECD4u, 0x70u) ||
+        ram.load32(0x0A10ECD4u) != 0x8C900088u ||
+        ram.load32(0x0A10ECF0u) != 0x0200F809u ||
+        ram.load32(kPreviewCopyReturn) != 0x8E220B8Cu ||
+        ram.load32(0x0A10ED40u) != 0x962304F6u) return false;
+    const auto choice = loaded[part];
+    if (choice < 0 || choice > 65535) return false;
+    const auto sex_byte = ram.load8(source + 0x458u);
+    if (sex_byte > 1u || ram.load8(preview + 0x458u) != sex_byte) return false;
+    const auto sex = static_cast<Sex>(sex_byte);
+    const auto kind = static_cast<std::uint8_t>(part);
+    const auto id = static_cast<std::uint16_t>(choice);
+    if (id != 0u && !wearable_by(ram, kind, id, sex)) return false;
+    const auto model = armor_model(ram, kind, id, sex);
+    if (!model || *model >= 125u || *model != ram.load16(source + kCachedModels + part * 2u)) return false;
+    const auto current = preview + kPreviewEquipment + part * 16u;
+    const auto requested = preview + kPreviewRequestedEquipment + part * 12u;
+    if (ram.load16(current) != ram.load16(requested)) return false;
+    // These are private appearance records of the preview, not the character,
+    // equipment box or network hunter records. Do not change their other fields.
+    ram.store16(current, id);
+    ram.store16(requested, id);
+    return true;
+}
+
 std::vector<Offer> offers(const Ram &ram, std::uint8_t part, bool all) {
     std::vector<Offer> list;
     const std::optional<Look> look = hunter_look(ram);

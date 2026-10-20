@@ -218,9 +218,118 @@ void test_layered_armor() {
     check(!layered::own_hunter(ram, hunter), "another player's hunter is not ours");
 }
 
+void test_layered_smithy_preview() {
+    namespace la = mhp3rd::game::layered;
+    BufferRam ram(kBase, kSize);
+    const std::uint32_t preview = 0x09100000u, vtable = 0x09200000u;
+    const std::uint32_t source = 0x09300000u, source_vtable = 0x09400000u;
+    ram.store32(preview, vtable);
+    ram.store32(source, source_vtable);
+    ram.store32(vtable + la::kFileFunctionSlot, la::kPreviewFileFunction);
+    ram.store32(source_vtable + la::kFileFunctionSlot, la::kRecordFileFunction);
+    ram.store32(0x0A10ECD4u, 0x8C900088u);
+    ram.store32(0x0A10ECF0u, 0x0200F809u);
+    ram.store32(la::kPreviewCopyReturn, 0x8E220B8Cu);
+    ram.store32(0x0A10ED40u, 0x962304F6u);
+    write_tables(ram);
+    write_character(ram, 1u, 0u);
+    la::Pieces loaded{2, 2, 2, 2, 2};
+    const auto prepare = [&](std::uint32_t part) {
+        return la::prepare_preview_copy(ram, la::kPreviewCopyReturn, preview, source, part, loaded);
+    };
+    for (const auto sex : {Sex::Male, Sex::Female}) {
+        ram.store8(preview + 0x458u, static_cast<std::uint8_t>(sex));
+        ram.store8(source + 0x458u, static_cast<std::uint8_t>(sex));
+        for (std::uint32_t part = 0; part < la::kParts; ++part) {
+            const auto kind = static_cast<std::uint8_t>(part);
+            write_armor(ram, armor_data(kind), 1u, 3u, 4u, 0x0Fu);
+            write_armor(ram, armor_data(kind), 2u, 44u, 45u, 0x0Fu);
+            const auto model = sex == Sex::Female ? 45u : 44u;
+            const auto current = preview + la::kPreviewEquipment + part * 16u;
+            const auto request = preview + la::kPreviewRequestedEquipment + part * 12u;
+            ram.store16(current, 1u);
+            ram.store16(request, 1u);
+            ram.store16(current + 2u, 7u);
+            ram.store16(request + 2u, 9u);
+            ram.store16(source + la::kCachedModels + part * 2u, static_cast<std::uint16_t>(model));
+            check(prepare(part), "copied appearance gets matching preview-only equipment ids");
+            check(
+                ram.load16(current) == 2u && ram.load16(request) == 2u, "both preview records match the copied model");
+            check(armor_model(ram, kind, ram.load16(request), sex) == model,
+                "ordinary file lookup agrees with copied geometry for an unchanged part");
+            check(ram.load16(current + 2u) == 7u && ram.load16(request + 2u) == 9u,
+                "other preview record fields are preserved");
+            check(ram.load16(source + la::kCachedModels + part * 2u) == model, "source hunter remains unchanged");
+            // Actual trace ordering: request the selected armor first; update
+            // the current model only AFTER loading. Include the real worn id.
+            ram.store16(request, 1u);
+            check(!prepare(part), "an already staged selection is not overwritten");
+            check(armor_model(ram, kind, ram.load16(request), sex) == (sex == Sex::Female ? 4u : 3u),
+                "selecting real worn armor loads its real model instead of freezing the layered model");
+            ram.store16(current, 1u);
+        }
+    }
+    check(worn_armor(ram, 0)->id == 1u, "real character equipment is unchanged");
+    check(!prepare(5) && !prepare(6) && !prepare(8), "hair, face and weapons remain unchanged");
+    check(!la::prepare_preview_copy(ram, 0u, preview, source, 0u, loaded), "unrelated callers are ignored");
+    check(!la::prepare_preview_copy(ram, la::kPreviewCopyReturn, source, source, 0u, loaded),
+        "never edit the live hunter");
+    check(!la::prepare_preview_copy(ram, la::kPreviewCopyReturn, 0xFFFFFFF0u, source, 0u, loaded),
+        "invalid preview range");
+    check(!la::prepare_preview_copy(ram, la::kPreviewCopyReturn, preview, 0xFFFFFFF0u, 0u, loaded),
+        "invalid source range");
+    ram.store16(source + la::kObjectIndex, 1u);
+    check(!prepare(0), "other network hunters are ignored");
+    ram.store16(source + la::kObjectIndex, 0u);
+    ram.store32(preview, 0xFFFFFFF0u);
+    check(!prepare(0), "invalid preview vtable");
+    ram.store32(preview, vtable);
+    ram.store32(vtable + la::kFileFunctionSlot, la::kRecordFileFunction);
+    check(!prepare(0), "non-preview destination is ignored");
+    ram.store32(vtable + la::kFileFunctionSlot, la::kPreviewFileFunction);
+    for (const auto address : {0x0A10ECD4u, 0x0A10ECF0u, la::kPreviewCopyReturn, 0x0A10ED40u}) {
+        const auto word = ram.load32(address);
+        ram.store32(address, 0u);
+        check(!prepare(0), "replaced overlay code is rejected");
+        ram.store32(address, word);
+    }
+    for (const auto choice : {-1, 65536}) {
+        loaded[0] = choice;
+        check(!prepare(0), "real and invalid appearance choices do not change preview records");
+    }
+    loaded[0] = 2;
+    ram.store8(source + 0x458u, 2u);
+    check(!prepare(0), "invalid source sex");
+    ram.store8(source + 0x458u, 0u);
+    check(!prepare(0), "mismatched preview sex");
+    ram.store8(source + 0x458u, 1u);
+    ram.store8(kChestData + 2u * kArmorRecord + 4u, 1u);
+    check(!prepare(0), "incompatible appearance is rejected");
+    ram.store8(kChestData + 2u * kArmorRecord + 4u, 0x0Fu);
+    ram.store16(source + la::kCachedModels, 44u);
+    check(!prepare(0), "a newer setting cannot replace the actually loaded appearance");
+    ram.store16(source + la::kCachedModels, 45u);
+    for (const std::uint16_t model : {0u, 124u, 125u, 65535u}) {
+        loaded[0] = model == 0u ? 0 : 2;
+        write_armor(ram, kChestData, static_cast<std::uint16_t>(loaded[0]), model, model, 0x0Fu);
+        ram.store16(source + la::kCachedModels, model);
+        check(prepare(0) == (model < 125u), "empty appearance and model boundaries");
+    }
+    BufferRam short_ram(kBase, 0x00100000u);
+    const auto short_preview = kBase + 0x1000u, short_source = kBase + 0x4000u;
+    const auto short_vtable = kBase + 0x7000u, short_source_vtable = kBase + 0x8000u;
+    short_ram.store32(short_preview, short_vtable);
+    short_ram.store32(short_source, short_source_vtable);
+    short_ram.store32(short_vtable + la::kFileFunctionSlot, la::kPreviewFileFunction);
+    short_ram.store32(short_source_vtable + la::kFileFunctionSlot, la::kRecordFileFunction);
+    check(!la::prepare_preview_copy(short_ram, la::kPreviewCopyReturn, short_preview, short_source, 0u, loaded),
+        "unmapped overlay code is rejected");
+}
+
 } // namespace
 
 int main() {
+    test_layered_smithy_preview();
     test_layered_armor();
     test_nothing_loaded();
     test_files();

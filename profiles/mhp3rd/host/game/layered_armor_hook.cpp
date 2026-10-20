@@ -83,6 +83,8 @@ struct State {
     bool trace{};
     const Compiled *original{};
     const Compiled *step{};
+    const Compiled *preview_original{};
+    bool preview_installed{};
     bool step_installed{};
     std::uint32_t observed_object{};
     const psprecomp::GuestMemory *observed_memory{};
@@ -138,6 +140,16 @@ void model_of_part(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx)
     s.original->function(runtime, ctx);
 }
 
+void preview_copy_part(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
+    State &s = state();
+    GuestRam ram(runtime.memory());
+    // At this constructor call, s3 holds the live hunter, a0 the preview and
+    // a1 the part. Use the loaded look, even if the menu settings changed later.
+    if (prepare_preview_copy(ram, ctx.gpr[31], ctx.gpr[4], ctx.gpr[19], ctx.gpr[5], s.loaded) && s.trace)
+        std::cout << "[layered-preview] copied part=" << ctx.gpr[5] << " appearance=" << s.loaded[ctx.gpr[5]] << '\n';
+    s.preview_original->function(runtime, ctx);
+}
+
 // The look the hunter is to be drawn in; the real one while off.
 Pieces wanted(const State &s) { return s.on ? s.pieces : Pieces{kReal, kReal, kReal, kReal, kReal}; }
 
@@ -180,6 +192,9 @@ bool check(psprecomp::Runtime &runtime) {
                   << ", expected 0x" << expected.word << std::dec << "; layered armor unavailable\n";
         return false;
     }
+    s.preview_original = compiled(kCopyPart);
+    if (runtime.memory().load32(kCopyPart) != 0x27BDFFF0u ||
+        runtime.memory().load32(kCopyPart + 4u) != 0xAFB20008u) s.preview_original = nullptr;
     s.step = compiled(kLoadStep);
     for (const CodeWord &expected : kLoadSignature)
         if (runtime.memory().load32(expected.address) != expected.word) s.step = nullptr;
@@ -214,6 +229,14 @@ void frame(psprecomp::Runtime &runtime) {
     if (observe && !s.step_installed && s.step != nullptr) {
         runtime.register_function(kLoadStep, &load_step, "mhp3rd_device_hunter_observation");
         s.step_installed = true;
+    }
+    // Keep this guard after switching layered armor off: the live hunter can
+    // still carry the old loaded appearance until the next scene load.
+    const char *preview_fix = std::getenv("MHP3RD_LAYERED_PREVIEW_FIX");
+    if (s.on && !s.preview_installed && s.preview_original &&
+        !(preview_fix && std::string(preview_fix) == "0")) {
+        runtime.register_function(kCopyPart, &preview_copy_part, "mhp3rd_layered_preview_copy");
+        s.preview_installed = true;
     }
     // Only ever at the flip, from an import: no generated code is running, so
     // the dispatch tables can change here.
