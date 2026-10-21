@@ -1,6 +1,7 @@
 // Which defaults each platform starts from; no settings.ini is read.
 #include "settings/settings.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -388,6 +389,29 @@ void test_performance_modes() {
 }
 
 int main() {
+    {
+        using namespace mhp3rd::gpu::hud;
+        check(from_entries({}).hud == Layout{} && defaults_for(Platform::Android).hud == Layout{},
+            "old settings and both platforms preserve the original HUD");
+        const auto legacy = from_entries({{"hud.scale", "0.75"}});
+        check(legacy.hud == Layout{} && !to_entries(legacy).contains("hud.scale"),
+            "the removed global scale is ignored and no longer written");
+        Settings edited;
+        edited.hud.blocks[0] = {0.85f, 0.1234f, 0.2345f};
+        edited.hud.blocks[1] = {1.25f, -0.2f, 0.3f};
+        edited.hud.blocks[2] = {1.1f, -0.4f, -0.5f};
+        check(from_entries(to_entries(edited)).hud == edited.hud, "all HUD blocks round trip with drag precision");
+        for (const auto *bad : {"nan", "inf", "-inf", "1oops", ""}) {
+            const auto invalid =
+                from_entries({{"hud.status.scale", bad}, {"hud.map.x", bad}, {"hud.items.scale", bad}});
+            check(invalid.hud == Layout{}, "invalid or non-finite HUD values retain safe defaults");
+        }
+        const auto clamped = from_entries(
+            {{"hud.status.scale", "5"}, {"hud.map.scale", "0.1"}, {"hud.map.x", "-10"}, {"hud.map.y", "5"}});
+        check(clamped.hud.blocks[0].scale == kMaxScale && clamped.hud.blocks[1].scale == kMinScale &&
+                clamped.hud.blocks[1].x == -1.0f && clamped.hud.blocks[1].y == 1.0f,
+            "saved HUD values obey supported scale and position limits");
+    }
     {
         using namespace mhp3rd::input::touch;
         Settings edited = from_entries({});

@@ -7357,6 +7357,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
         }
     }
 
+    // The original packet and its deferred glyphs carry the same semantic
+    // group. Apply geometry only after UV clamping and the normal Fill fit;
+    // offscreen pictures, the world and other menus keep their coordinates.
+    hud::Transform hud_transform;
+    if (call.through && !call.clear_mode && impl.shows(call.target.color_address)) {
+        const hud::Part part = hud::part(call.command_address, call.call_return);
+        hud_transform = hud::transform(settings::current().hud, part, fitted ? fit_x : 1.0f, fitted ? fit_y : 1.0f);
+        if (!hud_transform.identity())
+            for (GpuVertex &vertex : impl.scratch) hud_transform.point(vertex.x, vertex.y);
+    }
+
     static const bool no_merge_env = std::getenv("MHP3RD_NO_DRAW_MERGE") != nullptr;
     const bool merge = !no_merge_env && !perf::alternate_off(perf::NewPath::Merge);
     // A skinned draw recorded for drawing again keeps a copy of its vertices,
@@ -7635,6 +7646,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
         edges[1] = centre_y + (edges[1] - centre_y) * fit_y;
         edges[3] = centre_y + (edges[3] - centre_y) * fit_y;
     }
+    if (!hud_transform.identity())
+        hud_transform.clip(edges, sx1 == 0u && sx2 == kPspWidth - 1u, sy1 == 0u && sy2 == kPspHeight - 1u);
     const auto to_pixels = [](float edge, float scale, std::uint32_t size) {
         return static_cast<std::int32_t>(std::clamp(std::lround(edge * scale), 0l, static_cast<long>(size)));
     };

@@ -52,6 +52,7 @@
 #include "ui/ui.hpp"
 #include "ui/bindings_editor.hpp"
 #include "ui/touch_editor.hpp"
+#include "ui/hud_editor.hpp"
 #include "ui/touch_overlay.hpp"
 #if defined(MHP3RD_DEBUG_MENU)
 #include "debug/debug_console.hpp"
@@ -2909,6 +2910,390 @@ void bindings_editor_contracts(gpu::VulkanRenderer &renderer) {
     layer.set_interactive(false);
 }
 
+void hud_editor_contracts(gpu::VulkanRenderer &renderer) {
+    namespace hud = gpu::hud;
+    auto &player = settings::current();
+    const auto saved = player.hud;
+    const auto saved_aspect = player.aspect;
+    player.hud = {};
+    auto &layer = ui::Layer::get();
+    layer.set_interactive(true);
+    ScriptedUiMouse mouse(renderer.window());
+    ui::open_hud_editor();
+    const auto frame = [&](const char *focused = nullptr, bool back = false) {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+        if (focused) {
+            if (auto *window = ImGui::FindWindowByName("##hud_editor")) {
+                ImGui::FocusWindow(window);
+                ImGui::SetFocusID(window->GetID(focused), window);
+                ImGui::SetNavCursorVisible(true);
+            }
+        }
+        ui::hud_editor_frame(back);
+        layer.end_frame();
+        renderer.present_ui(true);
+    };
+    const auto activate = [&](const char *label, ImGuiKey key = ImGuiKey_Space) {
+        frame(label);
+        frame(label);
+        ImGui::GetIO().AddKeyEvent(key, true);
+        frame(label);
+        ImGui::GetIO().AddKeyEvent(key, false);
+        frame();
+    };
+    frame();
+    frame();
+    expect(ui::hud_editor_open(), "HUD editor opens without requiring private game data");
+    activate("Block Scale", ImGuiKey_LeftArrow);
+    expect(std::abs(player.hud.blocks[0].scale - 0.95f) < 0.001f, "HUD editor changes only the selected status scale");
+    expect(player.hud.blocks[0].x == 0 && player.hud.blocks[0].y == 0 && player.hud.blocks[1] == hud::Placement{},
+        "resizing preserves positions without coordinate sliders");
+    activate("Block", ImGuiKey_RightArrow);
+    activate("Block Scale", ImGuiKey_LeftArrow);
+    expect(player.hud.blocks[1].scale < 1, "map can be resized independently");
+    activate("Reset This Block");
+    expect(player.hud.blocks[1] == hud::Placement{} && player.hud.blocks[0].scale < 1,
+        "resetting one HUD block preserves another block's edits");
+    activate("Block", ImGuiKey_RightArrow);
+    activate("Block Scale", ImGuiKey_RightArrow);
+    expect(player.hud.blocks[2].scale > 1, "items can be enlarged independently");
+    activate("Restore HUD Defaults");
+    expect(player.hud == hud::Layout{}, "HUD editor restores every position and scale");
+
+    // Growing or shrinking a centred block used to move the panel to the
+    // other side during the same slider interaction, stealing the pointer.
+    for (const bool growing : {true, false}) {
+        frame(nullptr, true);
+        player.hud = {};
+        player.hud.blocks[2].scale = growing ? 0.5f : 0.55f;
+        gpu::hud::move_to(player.hud, gpu::hud::Part::Items, growing ? 198.0f : 190.0f, 150.0f);
+        ui::open_hud_editor();
+        frame();
+        activate("Block", ImGuiKey_RightArrow);
+        activate("Block", ImGuiKey_RightArrow);
+        frame();
+        auto *panel = ImGui::FindWindowByName("##hud_editor");
+        const auto before = panel->Pos;
+        const auto placement = player.hud.blocks[2];
+        activate("Block Scale", growing ? ImGuiKey_RightArrow : ImGuiKey_LeftArrow);
+        expect(panel->Pos.x == before.x && panel->Pos.y == before.y && player.hud.blocks[2].x == placement.x &&
+                player.hud.blocks[2].y == placement.y && player.hud.blocks[2].scale != placement.scale,
+            "scaling across screen centre keeps the panel and stored position stable on either side");
+    }
+    activate("Restore HUD Defaults");
+    activate("Block", ImGuiKey_RightArrow); // Items -> Status; put the panel on the right.
+    // Select the status at a point outside the opposite-side editor panel.
+    const auto picture = renderer.game_picture();
+    const auto display = ImGui::GetIO().DisplaySize;
+    const ImVec2 at{(picture[0] + picture[2] * 0.15f) * display.x, (picture[1] + picture[3] * 0.2f) * display.y};
+    ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+    frame();
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMousePosEvent(at.x + 2, at.y + 1);
+    frame();
+    expect(player.hud == hud::Layout{}, "a HUD selection or sub-threshold motion leaves exact placement alone");
+    ImGui::GetIO().AddMousePosEvent(at.x + 20, at.y + 16);
+    frame();
+    auto *drag_panel = ImGui::FindWindowByName("##hud_editor");
+    const auto panel_at = drag_panel->Pos;
+    // Continue across the floating panel. It must become transparent to
+    // input and must not interpret the held pointer as a slider/reset click.
+    ImGui::GetIO().AddMousePosEvent(
+        drag_panel->Pos.x + drag_panel->Size.x * 0.8f, drag_panel->Pos.y + drag_panel->Size.y * 0.4f);
+    frame();
+    unsigned maximum_alpha = 0;
+    for (const auto &vertex : drag_panel->DrawList->VtxBuffer)
+        maximum_alpha = std::max(maximum_alpha, (vertex.col >> IM_COL32_A_SHIFT) & 255u);
+    expect((drag_panel->Flags & ImGuiWindowFlags_NoInputs) == ImGuiWindowFlags_NoInputs && maximum_alpha > 0 &&
+            maximum_alpha <= 64 && drag_panel->Pos.x == panel_at.x && player.hud.blocks[0].scale == 1 &&
+            player.hud.blocks[1] == hud::Placement{},
+        "HUD dragging through the panel fades it, disables its input and never changes unrelated settings");
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    expect(player.hud.blocks[0].x > 0 && player.hud.blocks[0].y > 0,
+        "mouse drag moves the status block in game-picture coordinates");
+    expect((drag_panel->Flags & ImGuiWindowFlags_NoInputs) == 0,
+        "releasing the HUD drag restores normal panel interaction");
+
+    // The explicit movement mode owns all directional input until confirm.
+    player.hud.blocks[0].scale = 0.5f;
+    hud::move_to(player.hud, hud::Part::Status, 80, 70);
+    frame();
+    frame("Move Block");
+    frame("Move Block");
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
+    frame("Move Block");
+    frame();
+    frame();
+    auto *move_panel = ImGui::FindWindowByName("##hud_editor");
+    expect((move_panel->Flags & ImGuiWindowFlags_NoInputs) == ImGuiWindowFlags_NoInputs,
+        "holding the activation button cannot immediately confirm Move Block");
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
+    frame();
+    unsigned move_alpha = 0;
+    for (const auto &vertex : move_panel->DrawList->VtxBuffer)
+        move_alpha = std::max(move_alpha, (vertex.col >> IM_COL32_A_SHIFT) & 255u);
+    expect(move_alpha > 0 && move_alpha <= 64, "Move Block fades the entire options panel");
+    const auto move_start = player.hud;
+    const auto press_direction = [&](std::initializer_list<ImGuiKey> keys) {
+        for (const auto key : keys) ImGui::GetIO().AddKeyEvent(key, true);
+        frame();
+        frame();
+        for (const auto key : keys) ImGui::GetIO().AddKeyEvent(key, false);
+        frame();
+    };
+    press_direction({ImGuiKey_RightArrow});
+    const float right_offset = player.hud.blocks[0].x - move_start.blocks[0].x;
+    expect(right_offset > 0 && player.hud.blocks[0].y == move_start.blocks[0].y,
+        "arrow input moves the selected HUD block");
+    player.hud = move_start;
+    press_direction({ImGuiKey_D});
+    expect(std::abs(player.hud.blocks[0].x - move_start.blocks[0].x - right_offset) < 0.0001f,
+        "D duplicates the right arrow at the same speed");
+    player.hud = move_start;
+    press_direction({ImGuiKey_D, ImGuiKey_RightArrow});
+    expect(std::abs(player.hud.blocks[0].x - move_start.blocks[0].x - right_offset) < 0.0001f,
+        "duplicate directional sources never add their speeds");
+    player.hud = move_start;
+    press_direction({ImGuiKey_LeftArrow, ImGuiKey_D});
+    expect(player.hud == move_start, "opposite directions cancel instead of drifting");
+    for (const auto key : {ImGuiKey_LeftArrow, ImGuiKey_A}) {
+        player.hud = move_start;
+        press_direction({key});
+        expect(player.hud.blocks[0].x < move_start.blocks[0].x, "left arrow and A move left");
+    }
+    for (const auto key : {ImGuiKey_UpArrow, ImGuiKey_W, ImGuiKey_DownArrow, ImGuiKey_S}) {
+        player.hud = move_start;
+        press_direction({key});
+        const bool up = key == ImGuiKey_UpArrow || key == ImGuiKey_W;
+        expect(up ? player.hud.blocks[0].y < move_start.blocks[0].y : player.hud.blocks[0].y > move_start.blocks[0].y,
+            "WASD and vertical arrows move the selected block in the matching direction");
+    }
+    const auto before_pointer = player.hud;
+    for (const auto source : {ImGuiMouseSource_Mouse, ImGuiMouseSource_TouchScreen}) {
+        ImGui::GetIO().AddMouseSourceEvent(source);
+        ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+        frame();
+        ImGui::GetIO().AddMouseButtonEvent(0, true);
+        frame();
+        ImGui::GetIO().AddMousePosEvent(at.x + 100, at.y + 100);
+        frame();
+        ImGui::GetIO().AddMouseButtonEvent(0, false);
+        frame();
+        expect(player.hud == before_pointer, "mouse and touch cannot drag or select blocks during Move Block");
+    }
+    ImGui::GetIO().AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+    frame();
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+    frame();
+    frame();
+    expect(ui::hud_editor_open() && (move_panel->Flags & ImGuiWindowFlags_NoInputs) == 0,
+        "confirm returns from movement to the open HUD editor");
+    expect(GImGui->NavWindow == move_panel && GImGui->NavId == move_panel->GetID("Move Block"),
+        "confirm returns focus to Move Block in the options panel");
+    expect(player.hud == before_pointer, "confirm keeps the exact in-memory placement");
+    const auto persisted_hud = settings::from_entries(settings::to_entries(player)).hud;
+    for (std::size_t i = 0; i < hud::kParts.size(); ++i)
+        expect(persisted_hud.blocks[i].scale == player.hud.blocks[i].scale &&
+                std::abs(persisted_hud.blocks[i].x - player.hud.blocks[i].x) <= 0.000051f &&
+                std::abs(persisted_hud.blocks[i].y - player.hud.blocks[i].y) <= 0.000051f,
+            "confirmed positions persist within half the four-decimal settings unit");
+    activate("Move Block");
+    press_direction({ImGuiKey_LeftArrow});
+    frame(nullptr, true);
+    frame();
+    expect(
+        ui::hud_editor_open() && player.hud == before_pointer && (move_panel->Flags & ImGuiWindowFlags_NoInputs) == 0,
+        "Back cancels only the current move and leaves the HUD editor open");
+    activate("Restore HUD Defaults");
+    player.aspect = settings::Aspect::Fill;
+    frame();
+    activate("Block", ImGuiKey_LeftArrow);
+    activate("Done");
+    expect(!ui::hud_editor_open(), "Done returns from HUD editing");
+    ui::open_hud_editor();
+    frame();
+    frame(nullptr, true);
+    expect(!ui::hud_editor_open(), "Back closes HUD editing");
+    player.hud = saved;
+    player.aspect = saved_aspect;
+    layer.set_interactive(false);
+}
+
+void hud_gamepad_contracts(gpu::VulkanRenderer &renderer) {
+    namespace hud = gpu::hud;
+    auto &player = settings::current();
+    const auto saved = player;
+    auto &layer = ui::Layer::get();
+    SDL_VirtualJoystickDesc desc{};
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+    desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+    desc.name = "Public HUD positioning gamepad";
+    const auto id = SDL_AttachVirtualJoystick(&desc);
+    auto *pad = id ? SDL_OpenGamepad(id) : nullptr;
+    expect(pad != nullptr, "HUD positioning opens a real SDL virtual gamepad");
+    if (!pad) {
+        if (id) SDL_DetachVirtualJoystick(id);
+        return;
+    }
+    auto *joystick = SDL_GetGamepadJoystick(pad);
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, &pad, 1);
+    layer.set_interactive(true);
+    ScriptedUiMouse mouse(renderer.window());
+    bool focus_other = false;
+    const auto frame = [&](const char *focused = nullptr, bool back = false) {
+        SDL_UpdateJoysticks();
+        renderer.pump_events();
+        mouse.prepare_frame();
+        layer.begin_frame();
+        ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+        ImGui::SetNextWindowPos({1, 1});
+        ImGui::SetNextWindowSize({80, 40});
+        ImGui::Begin("##hud_other", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::Button("Other");
+        if (focus_other) {
+            auto *window = ImGui::GetCurrentWindow();
+            ImGui::FocusWindow(window);
+            ImGui::SetFocusID(window->GetID("Other"), window);
+        }
+        ImGui::End();
+        if (focused) {
+            if (auto *window = ImGui::FindWindowByName("##hud_editor")) {
+                ImGui::FocusWindow(window);
+                ImGui::SetFocusID(window->GetID(focused), window);
+                ImGui::SetNavCursorVisible(true);
+            }
+        }
+        if (ui::hud_editor_open()) ui::hud_editor_frame(back);
+        layer.end_frame();
+        renderer.present_ui(true);
+    };
+    const auto button = [&](SDL_GamepadButton key, bool down) {
+        expect(SDL_SetJoystickVirtualButton(joystick, key, down), "HUD virtual gamepad button state updates");
+    };
+    const auto axis = [&](SDL_GamepadAxis key, Sint16 value) {
+        expect(SDL_SetJoystickVirtualAxis(joystick, key, value), "HUD virtual stick state updates");
+    };
+    const auto press = [&](SDL_GamepadButton key) {
+        button(key, true);
+        frame();
+        frame();
+        button(key, false);
+        frame();
+        frame();
+    };
+    for (const bool south : {false, true}) {
+        player.confirm_south = south;
+        player.hud = {};
+        player.hud.blocks[0].scale = 0.5f;
+        hud::move_to(player.hud, hud::Part::Status, 80, 70);
+        ui::open_hud_editor();
+        frame();
+        frame();
+        expect(layer.gamepad_armed(), "HUD controller input arms after all buttons are released");
+        focus_other = true;
+        frame();
+        auto *panel = ImGui::FindWindowByName("##hud_editor");
+        expect(GImGui->NavWindow != panel, "the HUD focus test starts outside the options panel");
+        focus_other = false;
+        button(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true);
+        frame();
+        expect(GImGui->NavWindow == panel && GImGui->NavCursorVisible,
+            "gamepad input immediately returns focus to the HUD options panel");
+        button(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false);
+        frame();
+        frame("Move Block");
+        frame("Move Block");
+        const auto confirm = south ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST;
+        const auto cancel = south ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
+        button(confirm, true);
+        frame("Move Block");
+        frame();
+        expect((panel->Flags & ImGuiWindowFlags_NoInputs) == ImGuiWindowFlags_NoInputs,
+            "the configured gamepad confirm button enters Move Block and a hold cannot finish it");
+        button(confirm, false);
+        frame();
+        const auto start = player.hud;
+        float right_distance = 0;
+        for (const auto key : {SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_UP,
+                 SDL_GAMEPAD_BUTTON_DPAD_DOWN}) {
+            player.hud = start;
+            button(key, true);
+            frame();
+            frame();
+            button(key, false);
+            frame();
+            const auto &p = player.hud.blocks[0];
+            if (key == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+                right_distance = p.x - start.blocks[0].x;
+                expect(right_distance > 0, "D-pad right moves right");
+            } else if (key == SDL_GAMEPAD_BUTTON_DPAD_LEFT)
+                expect(p.x < start.blocks[0].x, "D-pad left moves left");
+            else if (key == SDL_GAMEPAD_BUTTON_DPAD_UP)
+                expect(p.y < start.blocks[0].y, "D-pad up moves up");
+            else
+                expect(p.y > start.blocks[0].y, "D-pad down moves down");
+            expect(player.hud.blocks[1] == start.blocks[1] && player.hud.blocks[2] == start.blocks[2],
+                "controller movement leaves unselected HUD blocks untouched");
+        }
+        player.hud = start;
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 32767);
+        frame();
+        frame();
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 0);
+        frame();
+        expect(std::abs(player.hud.blocks[0].x - start.blocks[0].x - right_distance) < 0.0001f,
+            "full left-stick input matches D-pad movement speed");
+        player.hud = start;
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 32767);
+        button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true);
+        frame();
+        frame();
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 0);
+        button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, false);
+        frame();
+        expect(std::abs(player.hud.blocks[0].x - start.blocks[0].x - right_distance) < 0.0001f,
+            "simultaneous stick and D-pad input cannot double movement speed");
+        for (const auto value : {Sint16{-32767}, Sint16{32767}}) {
+            player.hud = start;
+            axis(SDL_GAMEPAD_AXIS_LEFTY, value);
+            frame();
+            frame();
+            axis(SDL_GAMEPAD_AXIS_LEFTY, 0);
+            frame();
+            expect(value < 0 ? player.hud.blocks[0].y < start.blocks[0].y : player.hud.blocks[0].y > start.blocks[0].y,
+                "the left stick moves vertically in both directions");
+        }
+        const auto final = player.hud;
+        press(confirm);
+        expect(ui::hud_editor_open() && (panel->Flags & ImGuiWindowFlags_NoInputs) == 0 && GImGui->NavWindow == panel &&
+                GImGui->NavId == panel->GetID("Move Block") && player.hud == final,
+            "either configured gamepad confirm convention keeps the move and returns to options");
+        frame("Move Block");
+        frame("Move Block");
+        press(confirm);
+        press(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        press(cancel);
+        expect(ui::hud_editor_open() && player.hud == final && (panel->Flags & ImGuiWindowFlags_NoInputs) == 0,
+            "gamepad Back cancels a move without leaving the HUD editor");
+        frame(nullptr, true);
+    }
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
+    SDL_CloseGamepad(pad);
+    SDL_DetachVirtualJoystick(id);
+    renderer.pump_events();
+    player = saved;
+    layer.set_interactive(false);
+}
 void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     auto &player = settings::current();
     const auto saved_layout = player.touch_action;
@@ -5021,6 +5406,25 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     frame();
     expect(!ui::layered_armor_screen_open() && ui::menu_over_game() && !ui::take_quit_request(),
         "back closes the layered editor and returns to QoL without closing the menu");
+    if (gpu::hud::available() && gpu::hud::layout_enabled()) {
+        const auto saved_hud = settings::current().hud;
+        const bool hidden_before_menu = gpu::hud::hidden();
+        gpu::hud::set_hidden(false);
+        settings::current().hud.blocks[1] = {0.8f, -0.2f, 0.3f};
+        const auto placed_hud = settings::current().hud;
+        change_video("Hide HUD", ImGuiKey_Space);
+        expect(gpu::hud::hidden() && settings::current().hud == placed_hud,
+            "QoL Hide HUD preserves all stored block positions and scales");
+        change_video("Edit HUD Layout", ImGuiKey_Space);
+        expect(!ui::hud_editor_open(), "hidden HUD disables entering the layout editor");
+        change_video("Restore HUD Defaults", ImGuiKey_Space);
+        expect(gpu::hud::hidden() && settings::current().hud == gpu::hud::Layout{},
+            "HUD defaults remain accessible while hidden and preserve its visibility");
+        change_video("Hide HUD", ImGuiKey_Space);
+        expect(!gpu::hud::hidden(), "QoL Hide HUD restores visibility");
+        settings::current().hud = saved_hud;
+        gpu::hud::set_hidden(hidden_before_menu);
+    }
     cycle_setting("Fast Loading", &settings::Settings::fast_loading, true);
     cycle_setting("Fast-Forward", &settings::Settings::fast_forward);
     const auto original_fast_mode = settings::current().fast_forward;
@@ -5051,6 +5455,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     change_video("Free Camera", ImGuiKey_Space);
     expect(!settings::current().free_camera, "experimental free-camera setting restores disabled mode");
     const auto before_qol_reset = settings::current();
+    settings::current().hud.blocks[1] = {0.8f, -0.2f, 0.3f};
     settings::current().fast_loading = !settings::defaults().fast_loading;
     settings::current().fast_forward = fast_forward::Mode::Toggle;
     settings::current().fast_forward_speed = original_fast_speed + 1;
@@ -5062,6 +5467,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     change_video("Restore QoL Defaults", ImGuiKey_Space);
     const auto &qol_defaults = settings::defaults();
     const auto &reset_qol = settings::current();
+    expect(reset_qol.hud == gpu::hud::Layout{}, "QoL defaults restore all quest HUD blocks");
     expect(reset_qol.fast_loading == qol_defaults.fast_loading && reset_qol.fast_forward == qol_defaults.fast_forward &&
             reset_qol.fast_forward_speed == qol_defaults.fast_forward_speed &&
             reset_qol.lock_on == qol_defaults.lock_on && reset_qol.lock_on_marker == qol_defaults.lock_on_marker,
@@ -5939,6 +6345,8 @@ int run_contracts(int scripts) {
     if (scripts == 7) {
         render_contracts(renderer);
         touch_menu_footer_contracts(renderer, sandbox);
+        hud_editor_contracts(renderer);
+        hud_gamepad_contracts(renderer);
         touch_editor_contracts(renderer);
         touch_event_contracts(renderer);
         auto &player = settings::current();
@@ -6038,6 +6446,8 @@ int run_contracts(int scripts) {
     save_screen_contracts(renderer, sandbox);
     mods_screen_contracts(renderer, sandbox, fixture.runtime);
     bindings_editor_contracts(renderer);
+    hud_editor_contracts(renderer);
+    hud_gamepad_contracts(renderer);
     touch_editor_contracts(renderer);
     touch_event_contracts(renderer);
     scripted_mouse_contracts(renderer);

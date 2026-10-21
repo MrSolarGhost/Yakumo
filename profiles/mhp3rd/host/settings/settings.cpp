@@ -4,6 +4,7 @@
 #include "platform/utf8_path.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -173,6 +174,29 @@ std::string format_layered_piece(std::int32_t id) {
             [](Settings &s, const std::string &t) { return parse_layered_piece(t, s.layered_pieces[part]); },          \
             [](const Settings &s) { return format_layered_piece(s.layered_pieces[part]); }, nullptr                    \
     }
+
+// HUD positions need more precision than the ordinary two-decimal settings.
+Field hud_field(const char *key, std::function<float &(Settings &)> member, std::function<float(const Settings &)> read,
+    float minimum, float maximum) {
+    return {key, nullptr,
+        [=](Settings &s, const std::string &text) {
+            char *end = nullptr;
+            const float value = std::strtof(text.c_str(), &end);
+            if (end == text.c_str() || *end != '\0' || !std::isfinite(value)) return false;
+            member(s) = std::clamp(value, minimum, maximum);
+            return true;
+        },
+        [=](const Settings &s) {
+            char text[32];
+            std::snprintf(text, sizeof(text), "%.4f", static_cast<double>(read(s)));
+            return std::string(text);
+        },
+        nullptr};
+}
+#define HUD_FIELD(key, member, minimum, maximum)                                                                       \
+    hud_field(                                                                                                         \
+        key, [](Settings &s) -> float & { return s.hud.member; }, [](const Settings &s) { return s.hud.member; },      \
+        minimum, maximum)
 
 const std::vector<Field> &fields() {
     static const std::vector<Field> table = {
@@ -383,6 +407,15 @@ const std::vector<Field> &fields() {
             [](const Settings &s) { return std::string(s.lock_on ? "1" : "0"); },
             [](Settings &s, const char *t) { s.lock_on = variable_flag(t); }},
         BOOL_FIELD("input.lock_on_marker", lock_on_marker),
+        HUD_FIELD("hud.status.scale", blocks[0].scale, gpu::hud::kMinScale, gpu::hud::kMaxScale),
+        HUD_FIELD("hud.status.x", blocks[0].x, -1.0f, 1.0f),
+        HUD_FIELD("hud.status.y", blocks[0].y, -1.0f, 1.0f),
+        HUD_FIELD("hud.map.scale", blocks[1].scale, gpu::hud::kMinScale, gpu::hud::kMaxScale),
+        HUD_FIELD("hud.map.x", blocks[1].x, -1.0f, 1.0f),
+        HUD_FIELD("hud.map.y", blocks[1].y, -1.0f, 1.0f),
+        HUD_FIELD("hud.items.scale", blocks[2].scale, gpu::hud::kMinScale, gpu::hud::kMaxScale),
+        HUD_FIELD("hud.items.x", blocks[2].x, -1.0f, 1.0f),
+        HUD_FIELD("hud.items.y", blocks[2].y, -1.0f, 1.0f),
         {"input.camera_speed", "MHP3RD_CAMERA_SPEED",
             [](Settings &s, const std::string &t) { return parse_float(t, 20.0f, 720.0f, s.camera_speed); },
             [](const Settings &s) { return format_float(s.camera_speed); },

@@ -143,6 +143,7 @@ if(MHP3RD_RENDERER)
             host/ui/setup_screens.cpp
             host/ui/text_input.cpp
             host/ui/touch_editor.cpp
+            host/ui/hud_editor.cpp
             host/ui/touch_overlay.cpp
             host/ui/texture_pack_screen.cpp
             host/ui/translation_screen.cpp
@@ -193,6 +194,8 @@ set(MHP3RD_HOST_SOURCES
     host/camera/lock_on.cpp
     host/camera/free_camera.cpp
     host/gpu/game_hud.cpp
+    host/gpu/hud_layout.cpp
+    host/gpu/hud_packets.cpp
     host/gpu/ge_state.cpp
     host/gpu/texture_decode.cpp
     host/input/bindings.cpp
@@ -506,6 +509,15 @@ target_link_libraries(mhp3rd_aspect_tests PRIVATE psprecomp_core)
 set_target_properties(mhp3rd_aspect_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_aspect_tests COMMAND mhp3rd_aspect_tests)
+endif()
+
+# Quest HUD geometry and semantic ownership, using public synthetic inputs.
+add_executable(mhp3rd_hud_layout_tests tests/hud_layout_tests.cpp
+    host/gpu/hud_layout.cpp host/gpu/hud_packets.cpp)
+target_include_directories(mhp3rd_hud_layout_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_hud_layout_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_hud_layout_tests COMMAND mhp3rd_hud_layout_tests)
 endif()
 
 # Each platform's settings defaults.

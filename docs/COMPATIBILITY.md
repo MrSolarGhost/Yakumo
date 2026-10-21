@@ -660,3 +660,20 @@ Windows x64, source commit `e7b96c5` (`sound-settings`, based on `c40b979`):
 - A bounded game run with isolated data loaded all 355 existing overlays. The game audio diagnostic reported BGM/SFX at 7/7. Changing BGM through the new Audio menu produced BGM 6/7 with SFX still 7/7 after resuming. The Master Volume, BGM Volume and SFX Volume menu captures were inspected.
 - The user also confirmed that the controls work and both volume levels change during gameplay.
 - Original Options screen round trips, save/restart persistence of these levels, and other platforms were not checked in this pass. No coverage percentage was measured on Windows.
+
+
+## Quest HUD development check (2026-10-21)
+
+Windows x64, source commit `90ab685` (`hud-enhancements`, based on `90b66a6`):
+
+- The Release application build and all 74 registered CTest checks passed.
+  Coverage includes independent HUD geometry, settings persistence, packet and
+  deferred-text ownership, renderer/UI and touch contracts, keyboard movement
+  and public SDL virtual gamepads with both confirmation conventions.
+- Quest preview, scaling and mouse placement were exercised during Windows
+  development sessions. The final movement-mode, panel fading, focus and
+  cancellation contracts were checked through synthetic SDL/ImGui tests.
+  These checks do not certify every weapon-specific HUD element.
+- Physical Android touch input, physical-controller gameplay, other desktop
+  platforms, multiplayer and a complete weapon/HUD matrix were not verified.
+  Native line coverage was not measured on Windows.

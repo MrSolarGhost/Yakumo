@@ -409,7 +409,7 @@ The menu's text fields (*Hunter Name*, *Server*, *Nickname*) open the same keybo
 
 Drag the top tabs left or right with a mouse or a finger to scroll them. Releasing a drag does not switch tabs; a click does. Q/W and gamepad shoulder buttons still switch sections and reveal the selected tab. When using touch, the Q/W or shoulder-button hints beside the tabs disappear and the tabs use the full row. The bottom button hints give way to a **Close Menu** button at the bottom right. Pressing a keyboard key, mouse button or gamepad control restores its button hints.
 
-QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
+QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, quest HUD visibility, per-block size and positioning under **HUD Settings:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
 
 Restore QoL Defaults also resets the free-camera controls. Explicit environment
 overrides, other settings pages and the separate layered armor editor's choices
@@ -440,7 +440,6 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Video | Scaling Filter | `video.sharp_screen` | | Smooth or sharp scaling of the finished picture to the window |
 | Video | Texture Filter | `video.sharp_textures` | | Smooth (bilinear) or sharp (nearest) texture sampling |
 | Video | UI Textures | `video.ui_textures` | `MHP3RD_UI_TEXTURES` | Off (default), Sharp bilinear or MMPX, for the 2D interface above ×1 |
-| Video | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
 | Video | Texture Pack | `video.texture_pack` | `MHP3RD_TEXTURE_PACK` | On (default) or off: draw an installed [HD texture pack](#hd-texture-packs) instead of the game's textures. The footer shows how many textures the pack has and how many are on the GPU, or where the pack was looked for |
 | Video | Import Texture Pack… | `video.texture_pack_folder` | `MHP3RD_TEXTURE_PACK` (a folder) | Empty (default): the pack in `textures/NPJB40001`. A folder: the pack [imported to be used where it is](#importing-a-texture-pack). *Stop Using the Pack Folder* empties it |
 | Video | Vsync | `video.present_mode` | | On (FIFO), or off through mailbox or immediate presentation where the driver offers them |
@@ -490,6 +489,9 @@ The Android app starts from other defaults where a phone differs, with the same 
 | QoL (Modern Features → Layered Armor) | Layered Armor | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: the hunter is drawn in the pieces chosen below; stats, skills and the save keep the real armor. See [Layered armor](#layered-armor) |
 | QoL (Modern Features → Layered Armor) | Head, Chest, Arms, Waist, Legs | `look.layered_head`, `look.layered_chest`, `look.layered_arms`, `look.layered_waist`, `look.layered_legs` | | `real` (default): the piece worn; `0`: nothing; otherwise the id of the armor piece to show |
 | QoL (Modern Features → Layered Armor) | List All Armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
+| QoL (HUD Settings) | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
+| QoL (HUD Settings → Edit HUD Layout) | Block Scale; Drag to Move | `hud.status.scale/x/y`, `hud.map.scale/x/y`, `hud.items.scale/x/y` | | Individual scale (50–200%) and offsets from the original corners, as fractions of the game picture; default scale 1, offsets 0 |
+| QoL (HUD Settings) | Restore HUD Defaults | | | Restores the original size and position of all three blocks, including while the HUD is hidden |
 | QoL (Quality of Life) | Fast Loading | `video.fast_loading` | `MHP3RD_FAST_LOADING` | On (default) or off: while the game loads, and only then, it runs ahead of real time. Disabled in multiplayer. See [Fast loading](#fast-loading) |
 | QoL (Singleplayer Only Cheats) | Fast-Forward | `video.fast_forward` | `MHP3RD_FAST_FORWARD` | `hold` (default): the game runs faster while the Fast-forward key is held; `toggle`: one press turns it on, the next off; `off`: the key does nothing. Single player only. See [Fast-forward](#fast-forward) |
 | QoL (Singleplayer Only Cheats) | Fast-Forward Speed | `video.fast_forward_speed` | `MHP3RD_FAST_FORWARD_SPEED` | 2×–8× real time; default 3× |
@@ -1062,9 +1064,40 @@ It is the same clock as always, let go further. The kernel holds emulated time t
 - The camera keeps turning at real-time speed, so it stays controllable.
 - There is no gamepad button for it yet. On a Steam Deck, Steam Input can put the key on a back button.
 
+### Quest HUD layout
+
+**QoL → HUD Settings:** contains **Hide HUD**, **Edit HUD Layout** and
+**Restore HUD Defaults**. The editor changes three blocks independently:
+**Status** (clock, health, stamina, weapon gauges and party plates), **Map** and
+**Items**. Choose **Block** and adjust **Block Scale** (50–200%).
+Tap/click a block and drag it to move it with the mouse or touch screen.
+
+**Move Block** starts keyboard/gamepad positioning for the selected block:
+use the D-pad, left stick, arrow keys or WASD. Enter, Space or the configured
+gamepad confirm button keeps the position; Back/Esc cancels that move.
+While this mode is active, pointer/touch dragging and the options panel are
+disabled. The panel fades to 25% opacity during either movement method.
+It stays on the same side during a move or a scale adjustment. Gamepad input
+outside movement mode brings focus back to the options panel.
+
+**Reset This Block** resets only the selected block. **Restore HUD Defaults**
+resets all three positions and scales. While **Hide HUD** is on, entry to the
+editor is disabled with **HUD is hidden**; stored placements remain intact and
+defaults can still be restored. Showing the HUD again uses the saved layout.
+
+Open the editor in a quest to see the actual HUD. A paused menu redraws its
+held frame after an edit, without advancing the game. A menu configured to keep
+multiplayer running keeps that behavior. Positions are relative to the game
+picture and survive resolution changes. World-space name tags, dialogs,
+notifications and the touch-control layout keep their own positions.
+Settings are local to the device and do not change game saves.
+
+`MHP3RD_HUD_LAYOUT=0` restores the original geometry for comparison and disables
+the layout controls for that run, leaving saved placements intact.
+
 ### Hiding the HUD
 
-**Hide HUD** (Video, or its key, F7 by default: Controls, under *Port Features*) leaves the game's HUD out of the picture, for screenshots and videos: the health and stamina bars, sharpness, the clock, the item bar, the map, the name plate, the name tags over hunters and the icons beside them, and the prompts in the corners (*Select Target*, *Hide List*, *Depart on your Quest*). Menus, dialogs, fades, cutscenes and loading screens stay, so the game can be played with it on. The same again brings the HUD back. It is off at every start (`MHP3RD_HIDE_HUD=1` starts with it on); no gamepad preset binds it, but a pad binding a player makes works. A short line at the top says *HUD hidden* or *HUD shown* for a moment; it is left out of window captures (`shot`), and the game's frames (`MHP3RD_SCREENSHOT_DIR`) never have it.
+**Hide HUD** (QoL → HUD Settings, or its key, F7 by default: Controls, under *Port Features*) leaves the game's HUD out of the picture, for screenshots and videos: the health and stamina bars, sharpness, the clock, the item bar, the map, the name plate, the name tags over hunters and the icons beside them, and the prompts in the corners (*Select Target*, *Hide List*, *Depart on your Quest*). Menus, dialogs, fades, cutscenes and loading screens stay, so the game can be played with it on. The same again brings the HUD back. It is off at every start (`MHP3RD_HIDE_HUD=1` starts with it on); no gamepad preset binds it, but a pad binding a player makes works. A short line at the top says *HUD hidden* or *HUD shown* for a moment; it is left out of window captures (`shot`), and the game's frames (`MHP3RD_SCREENSHOT_DIR`) never have it.
 
 With the [free camera](#free-camera-experimental) the HUD is hidden while it flies and while it holds a photo, since name tags and the rest belong to the game's own view and would hang in the wrong place (*Hide the HUD While Flying*, QoL → Experimental Options, on by default). The key works while flying and in the photo mode too: it shows the HUD for the rest of the flight, and hides it again. The HUD packets of the frame the photo mode holds were sorted out when the game drew it, so the key shows and hides them there as well.
 
@@ -1076,7 +1109,7 @@ How the game's 2D draws were told apart (`host/gpu/game_hud.{hpp,cpp}`), traced 
 - The code that files it does. Every HUD element is drawn from inside one of two functions: `0x08945D78` in the village and the Guild Hall (name tags, prompts, *Status*) and `0x0A17370C` in a quest (`game_task.ovl`'s HUD). Menus and dialogs are drawn by other code. The port reads the guest's call stack when a packet is filed, the way the game's code builds it, and a packet filed from inside one of the two is HUD.
 - Most text is queued and drawn at the end of the frame, away from the code that asked for it. Calls into the text functions from the rest of the game are watched, and the queue entries added until the next watched call or packet belong to the code on the stack then. When a queue is drawn, the entry each glyph comes from is read off the drawing function's stack frame, and so is the list entry of each button icon in the text (the **L** of *Hide List*).
 
-The renderer then leaves out the HUD packets' draws, and nothing else: their other commands still run, so the GE state is the same either way. The watching starts only once the HUD is first hidden (or the free camera flies with the option on), and then stays for the run; with the HUD shown nothing is left out. If the game's code at those addresses is not what it was traced on, the switch is unavailable and says so on the console.
+The renderer then leaves out the HUD packets' draws, and nothing else: their other commands still run, so the GE state is the same either way. Layout editing normally keeps the packet tracking active so the paused editor can redraw the held HUD. With `MHP3RD_HUD_LAYOUT=0`, watching starts only once the HUD is first hidden (or the free camera flies with the option on), and then stays for the run; with the HUD shown nothing is left out. If the game's code at those addresses is not what it was traced on, the switch is unavailable and says so on the console.
 
 ### Audio
 

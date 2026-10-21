@@ -4,8 +4,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "5c4e07eff5e34d66d6b0ba4bdc2d611c83f969dc3a08a164fb9859376ab7bdfd",
-    "reason": "Reviewed declarations and aggregate member defaults, including independent PSP and Action touch layouts; no standalone function body is exempted. Settings round trips, legacy defaults and invalid touch placements are tested. Executable implementations remain subject to the normal diff gate."
+    "sha256": "471751e697b99c0a1892a932c1cdcbdc0e95dff1a6430ac315406453ed5a58fc",
+    "reason": "Reviewed declarations and aggregate defaults, including local quest HUD placements; no handwritten function body is exempted. HUD settings defaults, round trips and invalid scale/offset values are tested. Out-of-line implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
     "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",
@@ -82,5 +82,25 @@
   "profiles/mhp3rd/host/ui/widgets.hpp": {
     "sha256": "b8da36c98559426edfcc5d276933983397ff89b512ad836d72df264b89e8e42f",
     "reason": "Reviewed optional touch-footer parameter declaration and its documentation only; no executable function body is exempted. Actual touch-menu footer bounds, device switching, drag cancellation and tap-to-resume are tested in renderer/UI contracts. Widget and menu implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/gpu/game_hud.hpp": {
+    "sha256": "a60ac56430a96bb0b205b8001b20dc51d16c67329c87b0efd4c6df592bab8caa",
+    "reason": "Reviewed function declarations and comments only; no executable body is exempted. Quest block ownership and deferred packet/queue tags have synthetic regressions, and real-game tracing/manual HUD verification remains a separate device scenario. Implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/gpu/hud_layout.hpp": {
+    "sha256": "076c80b37ea3012c0af2c86e433d2383f17c865b85f3cbaa51425df9502ea9bb",
+    "reason": "Reviewed types, constants, function declarations and defaulted comparison operators; no handwritten function body is exempted. Independent block geometry, movement speed/diagonals, clipping, bounds and settings persistence are tested in out-of-line implementations subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/gpu/hud_packets.hpp": {
+    "sha256": "b3c85c62ffdefc216816fb8056f8470f153e957b2b9fea12f88caea54a7e51ca",
+    "reason": "Reviewed class/function declarations and private storage only; no executable body is exempted. Packet overwrite, range bounds and deferred glyph/icon ownership implementations have synthetic tests and remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/hud_editor.hpp": {
+    "sha256": "2f8876d4c41f4c9d62df75dfa51391b5d9ac7cb6cf4f903d00d7f5a9cf95e07d",
+    "reason": "Reviewed function declarations and comments only; no executable body is exempted. Editor implementation is tested with SDL/ImGui pointer events, keyboard positioning and virtual gamepads, including focus, confirmation, cancellation and blocked pointer input; implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/ui.hpp": {
+    "sha256": "7e876045929b8a83f9c7bfbc846d5a5bef11c9602da8548130414531ba80e6ac",
+    "reason": "Reviewed function declarations and a comment documenting the optional paused-menu refresh callback; no executable body is exempted. Menu and editor implementations remain subject to the normal diff gate. Paused real-game display-list replay requires a separate device check."
   }
 }
