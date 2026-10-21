@@ -40,7 +40,7 @@ stage="$work/stage/yakumo"
 expected_executable_sha256=55c0598436c0753b04331f8e95d406f832d9217806e3a896fed0e88b33637d8c
 # Only the exact original public toy ELF is accepted in the secret-free PR job.
 if [[ "${NIGHTLY_PROBE:-0}" == 1 ]]; then
-    expected_executable_sha256=6f9a8bc6132d28d811c775d7bce00d46c5b83da08f774e64161f7ae0e589a3d1
+    expected_executable_sha256=3769f2b1e8d78cc58a6a4c381a2bc8cb9390aa9beb2d7ecd45fba418cda243de
 fi
 
 version=""

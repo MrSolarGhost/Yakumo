@@ -25,7 +25,7 @@ class SyntheticElfTests(unittest.TestCase):
         ident, kind, machine, version, entry, phoff, shoff, flags, ehsize, phsize, phnum, shsize, shnum, strings = self.header
         self.assertEqual(ident[:7], b'\x7fELF\x01\x01\x01')
         self.assertEqual((kind, machine, version, entry, ehsize, phsize, phnum, shsize, shnum, strings),
-                         (2, 8, 1, probe.ENTRY, 52, 32, 21, 40, 23, 22))
+                         (2, 8, 1, probe.ENTRY, 52, 32, 22, 40, 24, 23))
         self.assertLess(len(self.data), 4096)
         self.assertEqual(len(self.data), shoff + shnum * shsize)
         addresses = set()
@@ -41,7 +41,7 @@ class SyntheticElfTests(unittest.TestCase):
             section = struct.unpack_from('<10I', self.data, shoff + (index + 1) * shsize)
             self.assertEqual(section[1:6], (1, 6, address, offset, size))
         self.assertEqual(addresses, {probe.ENTRY, probe.DISPATCH, probe.TERMINAL, *probe.HOOKS})
-        self.assertEqual(len(addresses), 21)
+        self.assertEqual(len(addresses), 22)
         for before, after in zip(spans, spans[1:]):
             self.assertLessEqual(before[1], after[0])
 
@@ -65,6 +65,13 @@ class SyntheticElfTests(unittest.TestCase):
             self.assertIsNotNone(values)
             self.assertEqual({int(value, 16) for value in values[1].split()}, set(expected))
         self.assertIn(f'0x{probe.CAMERA:08X}', cmake)
+
+    def test_linux_release_pin_matches_exact_public_elf(self):
+        script = (nightly.ROOT / 'profiles/mhp3rd/scripts/release_linux.sh').read_text()
+        condition = re.search(r'if \[\[ "\$\{NIGHTLY_PROBE:-0\}" == 1 \]\]; then\s+'
+                              r'expected_executable_sha256=([0-9a-f]{64})\s+fi', script)
+        self.assertIsNotNone(condition)
+        self.assertEqual(hashlib.sha256(self.data).hexdigest(), condition[1])
 
     def test_disc_is_explicit_small_sentinel_without_original_assets(self):
         self.assertLess(len(probe.DISC_SENTINEL), 256)

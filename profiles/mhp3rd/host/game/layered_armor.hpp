@@ -77,6 +77,18 @@ using Pieces = std::array<std::int32_t, kParts>;
 [[nodiscard]] std::optional<std::uint16_t> replacement_model(const Ram &ram, std::uint32_t block, std::uint32_t index,
                                                              std::uint32_t part, const Pieces &pieces);
 
+// The Smithy copies the live hunter's buffers before loading a selected piece.
+// Keep only that preview's equipment ids consistent with the copied appearance;
+// subsequent selection and file lookups remain the game's own operations.
+inline constexpr std::uint32_t kCopyPart = 0x088A5324u;
+inline constexpr std::uint32_t kPreviewFileFunction = 0x0A10EE8Cu;
+inline constexpr std::uint32_t kPreviewCopyReturn = 0x0A10ECF8u;
+inline constexpr std::uint32_t kCachedModels = 0x4F6u;
+inline constexpr std::uint32_t kPreviewEquipment = 0x4A2u;
+inline constexpr std::uint32_t kPreviewRequestedEquipment = 0x1452u;
+[[nodiscard]] bool prepare_preview_copy(Ram &ram, std::uint32_t caller, std::uint32_t preview,
+    std::uint32_t source, std::uint32_t part, const Pieces &loaded);
+
 // A piece the choice screen offers.
 struct Offer {
     std::uint16_t id{};
