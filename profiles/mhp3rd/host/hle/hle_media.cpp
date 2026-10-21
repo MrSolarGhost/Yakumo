@@ -166,7 +166,7 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
     if (found == media().ge_lists.end()) return;
     const perf::Clock::time_point start = perf::Clock::now();
     GeList &list = found->second;
-    if (camera::free_camera_active()) {
+    if (camera::free_camera_active() || gpu::hud::layout_enabled()) {
         MediaState::FrameRecording &recording = media().recording;
         if (!recording.start) recording.start = media().ge;
         recording.runs.push_back({list.pc, list.stall});
@@ -319,6 +319,25 @@ void replay_frame(Runtime &rt, gpu::VulkanRenderer &renderer) {
     }
 }
 
+// HUD edits redraw the held display lists, not guest logic or emulated time.
+// Keep normal multiplayer policy: running menus never enter this loop.
+bool run_paused_menu(Runtime &rt, gpu::VulkanRenderer &renderer) {
+    auto shown = settings::current().hud;
+    auto extent = renderer.target_size();
+    bool hidden = gpu::hud::hidden();
+    return ui::run_menu([&] {
+        const auto &layout = settings::current().hud;
+        const auto size = renderer.target_size();
+        if (layout == shown && size == extent && hidden == gpu::hud::hidden()) return;
+        shown = layout;
+        extent = size;
+        hidden = gpu::hud::hidden();
+        if (!media().last_frame.start) return;
+        renderer.begin_frame();
+        replay_frame(rt, renderer);
+    });
+}
+
 // The photo mode's frame step (#187). A step leaves the photo mode's loop
 // with the pause still on, so the game runs from the flip it stood still at
 // to its next flip, which comes back into the photo mode: exactly one game
@@ -381,7 +400,7 @@ bool run_photo_mode(Runtime &rt, gpu::VulkanRenderer &renderer, std::uint32_t ad
         // The HUD can be hidden and shown again on the held frame: it was
         // sorted from the rest when the game drew it.
         if (renderer.take_hide_hud_toggle()) gpu::hud::toggle();
-        if (ui::menu_requested() && !ui::run_menu()) {
+        if (ui::menu_requested() && !run_paused_menu(rt, renderer)) {
             rt.stop("quit from the menu");
             break;
         }
@@ -565,7 +584,7 @@ void present_frame(Runtime &rt) {
             // still while it runs in here, and the device stops playing.
             renderer.pause_interpolation();
             audio::AudioSink::instance().set_paused(true);
-            const bool keep_playing = ui::run_menu();
+            const bool keep_playing = run_paused_menu(rt, renderer);
             audio::AudioSink::instance().set_paused(false);
             // Resume at normal speed rather than racing to make up the pause,
             // and keep the pause out of the frame statistics.

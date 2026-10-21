@@ -1,4 +1,5 @@
 #include "gpu/game_hud.hpp"
+#include "gpu/hud_packets.hpp"
 
 #include "settings/settings.hpp"
 
@@ -10,7 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <map>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -163,6 +164,8 @@ struct State {
     bool shown_in_flight{}; // the player showed the HUD while the free camera hid it
     bool installed{};
     bool checked{};
+    bool quest_drawn{};
+    bool quest_visible{};
     bool available{};
     std::string note;
     Clock::time_point note_until{};
@@ -171,16 +174,16 @@ struct State {
     // the game fills the next one elsewhere, and the photo mode draws the last
     // shown one again, so a packet's range is kept until another packet is
     // filed over it.
-    std::map<std::uint32_t, std::uint32_t> packets;
+    PacketTags packets;
     // Text queue entries the HUD asked for, and the queues' lengths at the
     // last watched call.
-    std::vector<std::uint32_t> text_entries;
+    QueueTags text_entries;
     std::array<std::uint8_t, kQueues> lengths{};
     // Icons in HUD text, and each queue's icon count when last looked at.
-    std::vector<std::uint32_t> icons;
+    QueueTags icons;
     std::array<std::uint8_t, kQueues> icon_counts{};
     std::uint64_t icon_frame{~0ull};
-    bool last_call_hud{};
+    Part last_call{Part::None};
     std::uint32_t quest_hud_mismatches{};
     std::unordered_map<std::uint32_t, Frame> frames;
     // MHP3RD_TRACE_HUD
@@ -246,11 +249,11 @@ bool quest_hud_here(State &s, const psprecomp::GuestMemory &memory) {
 
 // Whether a HUD function is on the guest's call stack; the chain of return
 // addresses and function starts goes to `line` when one is given.
-bool from_hud(
+Part from_hud(
     State &s, const psprecomp::GuestMemory &memory, const psprecomp::AllegrexContext &ctx, std::string *line) {
     std::uint32_t ra = ctx.gpr[31];
     std::uint32_t sp = ctx.gpr[29];
-    bool hud = false;
+    Part part = Part::None;
     for (int depth = 0; depth < 12; ++depth) {
         const Frame *frame = frame_of(s, memory, ra);
         if (frame == nullptr) break;
@@ -260,14 +263,14 @@ bool from_hud(
             *line += text;
         }
         if (frame->start == kHubHud || (frame->start == kQuestHud && quest_hud_here(s, memory))) {
-            hud = true;
+            part = frame->start == kQuestHud ? quest_part(ra) : Part::Other;
             if (line == nullptr) break;
         }
         if (frame->ra_offset == ~0u || !memory.contains(sp + frame->ra_offset, 4u)) break;
         ra = memory.load32(sp + frame->ra_offset);
         sp += frame->size;
     }
-    return hud;
+    return part;
 }
 
 // The queue entries added since the last watched call belong to the code
@@ -280,26 +283,8 @@ void settle_text(State &s, const psprecomp::GuestMemory &memory) {
         const std::uint8_t length = memory.load8(context + kQueueLengths + queue);
         const std::uint32_t entries = memory.load32(context + kQueueEntries + queue * 4u);
         std::uint8_t &known = s.lengths[queue];
-        if (length < known) {
-            // Drawn and emptied: its entries are someone else's from now on.
-            const std::uint32_t end = entries + 256u * kEntryBytes;
-            std::erase_if(s.text_entries, [&](std::uint32_t e) { return e >= entries && e < end; });
-            known = 0u;
-        }
-        if (s.last_call_hud)
-            for (std::uint32_t i = known; i < length; ++i) s.text_entries.push_back(entries + i * kEntryBytes);
-        known = length;
+        s.text_entries.update(entries, kEntryBytes, 256u, known, length, s.last_call);
     }
-}
-
-void note_packet(State &s, std::uint32_t packet, std::uint32_t words, bool hud) {
-    const std::uint32_t end = packet + words * 4u;
-    // Whatever was filed where this packet now lies is gone.
-    auto it = s.packets.lower_bound(packet);
-    if (it != s.packets.begin() && std::prev(it)->second > packet) --it;
-    while (it != s.packets.end() && it->first < end) it = s.packets.erase(it);
-    if (hud) s.packets.emplace(packet, end);
-    if (s.packets.size() > 65536u) s.packets.clear(); // never expected; bounds a runaway
 }
 
 void on_file_packet(psprecomp::Runtime &runtime, const psprecomp::AllegrexContext &ctx) {
@@ -308,29 +293,31 @@ void on_file_packet(psprecomp::Runtime &runtime, const psprecomp::AllegrexContex
     settle_text(s, memory);
     const bool trace = tracing(s);
     std::string chain;
-    bool hud = from_hud(s, memory, ctx, trace ? &chain : nullptr);
+    Part part = from_hud(s, memory, ctx, trace ? &chain : nullptr);
     // Text a HUD function queues after drawing a packet of its own, as the
     // name plate does, is the HUD's too.
-    s.last_call_hud = hud;
+    s.last_call = part;
+    if (part == Part::Status || part == Part::Map || part == Part::Items) s.quest_drawn = true;
     const std::uint32_t sp = ctx.gpr[29];
     std::uint32_t entry = 0u;
-    if (!hud && ctx.gpr[31] == kGlyphFiled && memory.contains(sp + kGlyphSavedRa, 4u) &&
+    if (part == Part::None && ctx.gpr[31] == kGlyphFiled && memory.contains(sp + kGlyphSavedRa, 4u) &&
         memory.load32(sp + kGlyphSavedRa) == kGlyphFromQueue) {
         entry = memory.load32(sp + kGlyphSavedEntry);
-        hud = std::find(s.text_entries.begin(), s.text_entries.end(), entry) != s.text_entries.end();
+        part = s.text_entries.at(entry);
     }
-    if (!hud && ctx.gpr[31] == kIconFiled && memory.contains(sp + kIconEmitterFrame + kIconDrawSavedRa, 4u) &&
+    if (part == Part::None && ctx.gpr[31] == kIconFiled &&
+        memory.contains(sp + kIconEmitterFrame + kIconDrawSavedRa, 4u) &&
         memory.load32(sp + kIconEmitterSavedRa) == kIconEmitterFromIcon &&
         memory.load32(sp + kIconEmitterFrame + kIconDrawSavedRa) == kIconDrawFromList) {
         entry = memory.load32(sp + kIconEmitterFrame + kIconDrawSavedEntry);
-        hud = std::find(s.icons.begin(), s.icons.end(), entry) != s.icons.end();
+        part = s.icons.at(entry);
     }
-    note_packet(s, ctx.gpr[5], ctx.gpr[6], hud);
+    s.packets.file(ctx.gpr[5], ctx.gpr[6], part);
     if (trace) {
         char head[160];
         std::snprintf(head, sizeof(head), "[hud] f=%llu packet=%08X words=%u bucket=%u list=%08X %s |",
             static_cast<unsigned long long>(s.frame), ctx.gpr[5], ctx.gpr[6], ctx.gpr[7], ctx.gpr[4],
-            hud ? "HUD" : "-");
+            part != Part::None ? "HUD" : "-");
         std::cout << head << chain;
         if (entry != 0u) {
             char text[40];
@@ -363,13 +350,7 @@ void on_character_drawn(psprecomp::Runtime &runtime, const psprecomp::AllegrexCo
         const std::uint8_t count = memory.load8(context + kIconCounts + queue);
         const std::uint32_t list = context + kIconLists + queue * kIconListStride;
         std::uint8_t &known = s.icon_counts[queue];
-        if (count < known) {
-            std::erase_if(s.icons, [&](std::uint32_t e) { return e >= list && e < list + kIconListStride; });
-            known = 0u;
-        }
-        if (std::find(s.text_entries.begin(), s.text_entries.end(), entry) != s.text_entries.end())
-            for (std::uint32_t i = known; i < count; ++i) s.icons.push_back(list + i * kIconBytes);
-        known = count;
+        s.icons.update(list, kIconBytes, kIconListStride / kIconBytes, known, count, s.text_entries.at(entry));
         return;
     }
 }
@@ -380,10 +361,10 @@ void on_text_call(std::size_t which, psprecomp::Runtime &runtime, const psprecom
     settle_text(s, memory);
     const bool trace = tracing(s);
     std::string chain;
-    s.last_call_hud = from_hud(s, memory, ctx, trace ? &chain : nullptr);
+    s.last_call = from_hud(s, memory, ctx, trace ? &chain : nullptr);
     if (trace)
         std::cout << "[hud] f=" << s.frame << " text 0x" << std::hex << wrapped_address(which) << std::dec
-                  << (s.last_call_hud ? " HUD" : " -") << " |" << chain << "\n";
+                  << (s.last_call != Part::None ? " HUD" : " -") << " |" << chain << "\n";
 }
 
 template <std::size_t I> void wrapper(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
@@ -426,6 +407,7 @@ bool free_camera_hides() {
 void frame(psprecomp::Runtime &runtime, std::uint64_t presented_frames) {
     State &s = state();
     s.frame = presented_frames;
+    s.quest_visible = std::exchange(s.quest_drawn, false);
     if (!s.checked) {
         s.checked = true;
         if (const char *text = std::getenv("MHP3RD_TRACE_HUD"); text != nullptr && *text != '\0') {
@@ -440,7 +422,8 @@ void frame(psprecomp::Runtime &runtime, std::uint64_t presented_frames) {
     // host stack, so the dispatch tables may change. Put in place once first
     // needed, then kept, so that hiding and showing the HUD again works at
     // once, in the photo mode too, whose frame was sorted when it was drawn.
-    const bool wanted = s.hidden || (s.free_camera && free_camera_hides()) || s.trace_first != ~0ull;
+    const bool wanted =
+        layout_enabled() || s.hidden || (s.free_camera && free_camera_hides()) || s.trace_first != ~0ull;
     if (!s.installed && wanted && s.available) {
         s.installed = true;
         if (!install_all(runtime, std::make_index_sequence<kWrapped>{})) {
@@ -515,13 +498,20 @@ std::string note_text() {
 
 bool hides(std::uint32_t command_address, std::uint32_t call_return) {
     if (!active()) return false;
-    const State &s = state();
-    const auto inside = [&](std::uint32_t address) {
-        if (address == 0u) return false;
-        auto it = s.packets.upper_bound(address);
-        return it != s.packets.begin() && address < std::prev(it)->second;
-    };
-    return inside(command_address) || inside(call_return);
+    return state().packets.at(command_address, call_return) != Part::None;
+}
+
+Part part(std::uint32_t command_address, std::uint32_t call_return) {
+    return layout_enabled() ? state().packets.at(command_address, call_return) : Part::None;
+}
+
+bool quest_visible() {
+    return state().quest_visible;
+}
+
+bool layout_enabled() {
+    const char *value = std::getenv("MHP3RD_HUD_LAYOUT");
+    return value == nullptr || std::string_view(value) != "0";
 }
 
 } // namespace mhp3rd::gpu::hud

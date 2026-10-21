@@ -56,7 +56,8 @@ void set_lock_on_marker(std::optional<std::array<float, 2>> at);
 
 // Runs the menu over the last game frame until the player closes it. The
 // caller pauses the game around it. False: the player chose to quit.
-bool run_menu();
+// Optional refresh redraws a held game frame after settings change.
+bool run_menu(const std::function<void()> &refresh_game = {});
 
 // Opens the menu over the running game instead: draw_over_game() then draws
 // it with every game frame, and the game gets no input until it closes.

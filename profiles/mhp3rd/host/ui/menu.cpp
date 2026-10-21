@@ -20,6 +20,7 @@
 #include "ui/translation_screen.hpp"
 #include "ui/text_input.hpp"
 #include "ui/touch_editor.hpp"
+#include "ui/hud_editor.hpp"
 #include "ui/touch_overlay.hpp"
 #include "ui/widgets.hpp"
 
@@ -209,6 +210,12 @@ bool Menu::frame() {
     font_list_was_open = font_list_was_open || (tab_ == 7 && debug_screen_open());
 #endif
     back_ = back || pad_back;
+
+    if (hud_editor_open()) {
+        hud_editor_frame(back_);
+        if (!hud_editor_open()) focus_next_row();
+        return true;
+    }
 
     // The touch layout's editor takes the whole screen until it is done.
     if (touch_editor_open()) {
@@ -432,18 +439,6 @@ void Menu::video() {
             s.ui_textures = static_cast<settings::UiTextures>(cycle(current, delta, 3));
             settings::save();
         }
-    }
-    {
-        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::HideHud)]);
-        RowOptions o;
-        o.description = "Hides the game's HUD for pictures and videos: health, stamina, sharpness, the clock, the "
-                        "item bar, the map, name tags and prompts. Menus and dialogs stay. Its key (" +
-            (key.empty() ? std::string("none: set it in Controls") : key) + ") does the same.";
-        if (!gpu::hud::available()) {
-            o.disabled = true;
-            o.note = "Not with this game's code";
-        }
-        if (toggle_row("Hide HUD", gpu::hud::hidden(), o)) gpu::hud::toggle();
     }
     {
         RowOptions o = options_for("video.texture_pack",
@@ -1501,6 +1496,35 @@ void Menu::qol() {
         }
     }
     layered_armor_row();
+    section("HUD Settings:");
+    {
+        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::HideHud)]);
+        RowOptions o;
+        o.description = "Hides the game's HUD for pictures and videos: health, stamina, sharpness, the clock, the "
+                        "item bar, the map, name tags and prompts. Menus and dialogs stay. Its key (" +
+            (key.empty() ? std::string("none: set it in Controls") : key) + ") does the same.";
+        if (!gpu::hud::available()) {
+            o.disabled = true;
+            o.note = "Not with this game's code";
+        }
+        if (toggle_row("Hide HUD", gpu::hud::hidden(), o)) gpu::hud::toggle();
+    }
+    {
+        const bool disabled = !gpu::hud::available() || !gpu::hud::layout_enabled();
+        const std::string note = !gpu::hud::layout_enabled() ? "Disabled by MHP3RD_HUD_LAYOUT"
+            : !gpu::hud::available()                         ? "This game version is not supported"
+                                                             : "";
+        const bool hidden = gpu::hud::hidden();
+        if (button_row("Edit HUD Layout",
+                {disabled || hidden, hidden && !disabled ? "HUD is hidden" : note,
+                    "Move and resize the three quest HUD blocks with pointer, touch, keyboard or gamepad. Enter a quest for a live preview."}))
+            open_hud_editor();
+        if (button_row(
+                "Restore HUD Defaults", {disabled, note, "Restore the original quest HUD size and positions."})) {
+            s.hud = {};
+            settings::save();
+        }
+    }
     section("Quality of Life:");
     {
         RowOptions o = options_for("video.fast_loading",
@@ -1614,6 +1638,7 @@ void Menu::qol() {
         restore("video.fast_forward_speed", s.fast_forward_speed, d.fast_forward_speed);
         restore("input.lock_on", s.lock_on, d.lock_on);
         restore("input.lock_on_marker", s.lock_on_marker, d.lock_on_marker);
+        s.hud = d.hud;
         restore("experimental.free_camera", s.free_camera, d.free_camera);
         restore("experimental.free_camera_speed", s.free_camera_speed, d.free_camera_speed);
         restore("experimental.free_camera_hide_hud", s.free_camera_hide_hud, d.free_camera_hide_hud);
@@ -2276,13 +2301,19 @@ bool menu_requested() {
     return layer.take_menu_toggle() || touched;
 }
 
-bool run_menu() {
+bool run_menu(const std::function<void()> &refresh_game) {
     Layer &layer = Layer::get();
     note_menu_opened(true);
     layer.renderer().set_game_input(false);
     layer.set_interactive(true);
     Menu menu(true);
-    const bool window_open = layer.run([&] { return menu.frame(); }, true);
+    const bool window_open = layer.run(
+        [&] {
+            const bool keep = menu.frame();
+            if (refresh_game) refresh_game();
+            return keep;
+        },
+        true);
     layer.set_interactive(false);
     layer.renderer().set_game_input(true);
     note_menu_closed(menu.quit());

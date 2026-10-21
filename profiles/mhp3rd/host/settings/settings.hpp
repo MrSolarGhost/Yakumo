@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gpu/hud_layout.hpp"
 #include "input/bindings.hpp"
 #include "input/chords.hpp"
 #include "input/presets.hpp"
@@ -174,6 +175,9 @@ struct Settings {
     // By part, in the game's order (chest, arms, waist, legs, head): the armor
     // piece's id, 0 for none (the bare part), or kLayeredReal for the piece worn.
     std::array<std::int32_t, 5> layered_pieces{-1, -1, -1, -1, -1};
+
+    // Quest HUD: independent of touch controls.
+    gpu::hud::Layout hud;
 
     // Experimental
     // The free camera (camera/free_camera.hpp): off, nothing about the game

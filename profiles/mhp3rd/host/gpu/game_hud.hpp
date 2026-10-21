@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gpu/hud_layout.hpp"
+
 #include <cstdint>
 #include <string>
 
@@ -48,7 +50,7 @@ class Runtime;
 namespace mhp3rd::gpu::hud {
 
 // Called at every flip, where guest functions may be wrapped: puts the
-// wrappers in place once the HUD is first hidden (or MHP3RD_TRACE_HUD asks).
+// wrappers in place for layout editing, hiding the HUD or MHP3RD_TRACE_HUD.
 void frame(psprecomp::Runtime &runtime, std::uint64_t presented_frames);
 
 // The player's switch (the Hide HUD bind and the menu).
@@ -72,5 +74,12 @@ void set_free_camera(bool active);
 // `command_address` is its PRIM command, `call_return` where the list's
 // innermost CALL returns to.
 [[nodiscard]] bool hides(std::uint32_t command_address, std::uint32_t call_return);
+
+// The screen-space group of a draw. Other HUD elements keep their position.
+[[nodiscard]] Part part(std::uint32_t command_address, std::uint32_t call_return);
+// MHP3RD_HUD_LAYOUT=0 restores the original geometry and lazy HUD tracking.
+[[nodiscard]] bool layout_enabled();
+// A quest block was drawn in the last game frame (also valid while paused).
+[[nodiscard]] bool quest_visible();
 
 } // namespace mhp3rd::gpu::hud
