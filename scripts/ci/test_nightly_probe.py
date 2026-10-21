@@ -66,6 +66,13 @@ class SyntheticElfTests(unittest.TestCase):
             self.assertEqual({int(value, 16) for value in values[1].split()}, set(expected))
         self.assertIn(f'0x{probe.CAMERA:08X}', cmake)
 
+    def test_linux_release_pin_matches_exact_public_elf(self):
+        script = (nightly.ROOT / 'profiles/mhp3rd/scripts/release_linux.sh').read_text()
+        condition = re.search(r'if \[\[ "\$\{NIGHTLY_PROBE:-0\}" == 1 \]\]; then\s+'
+                              r'expected_executable_sha256=([0-9a-f]{64})\s+fi', script)
+        self.assertIsNotNone(condition)
+        self.assertEqual(hashlib.sha256(self.data).hexdigest(), condition[1])
+
     def test_disc_is_explicit_small_sentinel_without_original_assets(self):
         self.assertLess(len(probe.DISC_SENTINEL), 256)
         self.assertIn(b'Not a disc image', probe.DISC_SENTINEL)
