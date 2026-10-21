@@ -25,7 +25,7 @@ CAMERA = 0x08878B70
 HUD = (0x08876874, 0x088EA9B0, 0x088EB07C, 0x088EBF0C, 0x088EC060,
        0x088EC0F8, 0x088EC1F0, 0x088EC2EC, 0x088EC3E0, 0x088EC63C,
        0x088ECB74, 0x088ECC38, 0x088ECCE4, 0x088ECD9C, 0x088ECE58)
-LAYERED = (0x08869778, 0x088A5564)
+LAYERED = (0x08869778, 0x088A5564, 0x088A5324)
 HOOKS = (CAMERA, *HUD, *LAYERED)
 NDK_VERSION = '28.2.13676358'
 ANDROID_SDK_ROOTS = (Path('/usr/local/lib/android/sdk'),
@@ -41,7 +41,7 @@ extern "C" PROBE_EXPORT int yakumo_public_packaging_probe() { return 0; }
 
 
 def synthetic_elf():
-    """Build a sparse ELF32 with 21 tiny loaded executable function sections.
+    """Build a sparse ELF32 with tiny loaded executable function sections.
 
     The entry and dispatcher directly call every required profile hook so the
     normal analyzer discovers their registries. All instructions are standard
