@@ -33,6 +33,15 @@ What works on each platform, as last checked by hand. Each row is a part of the 
 
 Rows marked ❌ on every platform are missing features rather than platform problems.
 
+## Layered armor Smithy regression
+
+Windows gameplay validation of `067bf7e` confirmed that switching Smithy armor
+preview categories with layered armor enabled no longer reproduces the hang.
+Preview selections update and performance is normal. The local trace confirms
+the preview copy guard ran and the session ended through the game menu. The
+full synthetic equipment-model suite passed. Android and other platforms remain
+unverified for this fix; see [Layered armor](LAYERED_ARMOR.md#smithy-previews).
+
 ## Input
 
 | | macOS (Apple Silicon) | Linux | Steam Deck | Windows | Android (emulator only, device test pending [#127]) |

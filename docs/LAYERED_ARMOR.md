@@ -145,10 +145,9 @@ Only these private preview ids change; character, equipment box, save and networ
 records remain untouched.
 
 All subsequent selection, model lookup, loading and parsing use the original
-code. In particular, the request for a selected piece precedes its cached-model
-update. Returning that old cached model from the file lookup was tried and
-rejected: it prevented the hang but froze the preview. Selecting even the real
-worn piece must load its actual model, independently of the layered appearance.
+code. The request for a selected piece precedes its cached-model update, so the
+lookup must use the requested equipment id. Selecting even the real worn piece
+loads its actual model, independently of the layered appearance.
 
 The caller, source hunter, destination vtable and overlay instructions are
 validated before touching the preview. The guard remains installed after the
@@ -158,11 +157,11 @@ launch for comparisons. Overlay binaries and generated source are unchanged.
 
 Synthetic equipment-model tests exercise both sexes, all five armor parts,
 selection before cache update, empty armor, unchanged player data and unsupported
-objects/code. The user reported normal Windows performance after the temporary diagnostic
-packet collection was removed. The user confirmed the revised constructor fix works in Windows gameplay:
-Smithy preview selection works without the reproduced hang. The log confirms
-the copy guard ran and the game stopped via its menu. Android validation remains
-pending; this Windows result does not establish behavior on other platforms.
+objects/code. Windows gameplay validation of `067bf7e` confirmed that Smithy
+preview selection works without the reproduced hang, with normal performance.
+The log confirms the copy guard ran and the game stopped via its menu. Android
+validation remains pending; this Windows result does not establish behavior on
+other platforms.
 
 ## Multiplayer: what other players see
 
