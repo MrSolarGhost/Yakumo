@@ -11,6 +11,7 @@
 #include "game/guest_ram.hpp"
 #include "game/audio_settings.hpp"
 #include "game/layered_armor.hpp"
+#include "mods/transmog.hpp"
 #include "platform/utf8_path.hpp"
 
 #include "audio/audio_sink.hpp"
@@ -203,14 +204,16 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
     if (const auto cb = media().ge_callbacks.find(list.callback); cb != media().ge_callbacks.end())
         callback = &cb->second;
 
-    media().ge.set_signal_sink([callback](std::uint32_t signal, std::uint32_t pc) {
+    media().ge.set_signal_sink([callback, id](std::uint32_t signal, std::uint32_t pc) {
         if (callback == nullptr) return;
         const bool finish = (signal & 0x10000u) != 0u;
+        if (finish) mods::transmog::ge_finish_queued(id);
         const std::uint32_t function = finish ? callback->finish_function : callback->signal_function;
         if (function == 0u) return;
         InterruptCall call{};
         call.function = function;
         call.arguments = {signal & 0xFFFFu, finish ? callback->finish_argument : callback->signal_argument, pc, 0u};
+        if (finish) call.on_return = [id](std::uint32_t) { mods::transmog::ge_finish_returned(id); };
         kernel().queue_interrupt(std::move(call));
     });
 #if defined(MHP3RD_HAS_RENDERER)
@@ -247,6 +250,7 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
         log_ge_list("done id=" + std::to_string(id) + " list=" + psprecomp::hex32(list.start) +
             " pc=" + psprecomp::hex32(list.pc));
     media().ge.set_end_sink(nullptr);
+    mods::transmog::ge_list_finished(id, finished);
     media().ge.set_draw_sink(nullptr);
     media().ge.set_view_hook(nullptr);
     media().ge.set_transfer_sink(nullptr);
@@ -494,8 +498,8 @@ void present_frame(Runtime &rt) {
     // The menu, drawn below, reads the game's memory between frames.
     game::attach(rt);
     game::sound::trace(game::GuestRam(rt.memory()));
-    // Layered armor puts its wrappers in place here, between two frames.
-    game::layered::frame(rt);
+    // Transmog owns the appearance hooks; the old layered selector is retained
+    // only as a legacy settings migration input.
     // The game's text, in the player's language when one is chosen: applied
     // once the game has loaded its text block, between two frames.
     text::frame(rt.memory(), [](std::size_t bytes) -> std::optional<text::Arena> {
@@ -652,11 +656,15 @@ void register_display_ctrl(HleRegistrar &hle) {
     });
     // The guest flipping the framebuffer is the end of a frame.
     hle.add("sceDisplay", "sceDisplaySetFrameBuf", [](Runtime &rt, AllegrexContext &ctx) {
+        const auto execution = psprecomp::capture_runtime_execution_context();
+        const auto import_pc = ctx.pc;
         media().display.framebuffer = arg(ctx, 0);
         media().display.buffer_width = arg(ctx, 1);
         media().display.pixel_format = arg(ctx, 2);
         present_frame(rt);
         kernel().finish(ctx, 0u);
+        if (psprecomp::runtime_execution_context_matches(execution) && !kernel().in_interrupt() && ctx.pc == import_pc)
+            mods::transmog::frame(rt, ctx);
     });
 
     hle.add("sceCtrl", "sceCtrlSetSamplingCycle", [](Runtime &, AllegrexContext &ctx) {
@@ -794,6 +802,7 @@ void register_ge(HleRegistrar &hle) {
             log_ge_list("start id=" + std::to_string(id) + " list=" + psprecomp::hex32(list.start) +
                 " stall=" + psprecomp::hex32(list.stall));
         media().ge_lists[id] = std::move(list);
+        mods::transmog::ge_list_started(id, media().ge_lists[id].start, kernel().current_uid());
         perf::count_display_list();
         run_ge_list(rt, id);
         kernel().finish(ctx, id);
