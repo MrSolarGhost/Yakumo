@@ -80,10 +80,12 @@ struct GeCallback {
 };
 
 struct GeList {
+    std::uint32_t start{};
     std::uint32_t pc{};
     std::uint32_t stall{};
     std::int32_t callback{-1};
     bool done{};
+    gpu::GeState::ListExecutionState execution;
 };
 
 struct AudioChannel {
@@ -126,7 +128,33 @@ struct MediaState {
 
 MediaState &media() {
     static MediaState state;
+    // MHP3RD_GE_STRICT_LISTS=0 gives the GE its earlier list handling.
+    static const bool configured = [] {
+        state.ge.set_strict_lists(gpu::strict_lists_from_text(std::getenv("MHP3RD_GE_STRICT_LISTS")));
+        return true;
+    }();
+    (void)configured;
     return state;
+}
+
+// MHP3RD_TRACE_GE_LISTS=1: list starts, every END the GE reaches and list
+// completion; MHP3RD_TRACE_GE_LISTS_LIMIT caps the lines (default 4000).
+bool trace_ge_lists() {
+    static const bool enabled = [] {
+        const char *text = std::getenv("MHP3RD_TRACE_GE_LISTS");
+        return text != nullptr && *text != '\0' && std::string(text) != "0";
+    }();
+    return enabled;
+}
+
+void log_ge_list(const std::string &message) {
+    static std::uint64_t remaining = [] {
+        const char *limit = std::getenv("MHP3RD_TRACE_GE_LISTS_LIMIT");
+        return limit != nullptr ? std::strtoull(limit, nullptr, 10) : 4000ull;
+    }();
+    if (remaining == 0u) return;
+    --remaining;
+    std::cerr << "[ge-list] " << message << "\n";
 }
 
 // Runs a display list: the GE state machine produces draw calls for the
@@ -196,17 +224,29 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
     }
 #endif
     media().ge.set_transfer_sink([&rt](const gpu::BlockTransfer &transfer) { block_transfer(rt, transfer); });
+    if (trace_ge_lists()) {
+        media().ge.set_end_sink([id, start = list.start](const gpu::EndEvent &end) {
+            log_ge_list("end id=" + std::to_string(id) + " list=" + psprecomp::hex32(start) +
+                " at=" + psprecomp::hex32(end.end_address) + " prev=" + psprecomp::hex32(end.preceding_command) +
+                " finished=" + (end.finished ? "1" : "0"));
+        });
+    }
 
     bool finished = false;
     try {
         const perf::SplitScope split(perf::Split::Lists);
-        list.pc = media().ge.execute(rt.memory(), list.pc, list.stall, finished);
+        list.pc = media().ge.execute(rt.memory(), list.execution, list.pc, list.stall, finished);
     } catch (const psprecomp::Error &error) {
         // A malformed list must not take the whole run down: drop it and carry on.
         log_once("ge-list-error", std::string("[ge] display list aborted: ") + error.what());
+        if (trace_ge_lists()) log_ge_list("aborted id=" + std::to_string(id) + " list=" + psprecomp::hex32(list.start));
         finished = true;
     }
     list.done = finished;
+    if (trace_ge_lists() && finished)
+        log_ge_list("done id=" + std::to_string(id) + " list=" + psprecomp::hex32(list.start) +
+            " pc=" + psprecomp::hex32(list.pc));
+    media().ge.set_end_sink(nullptr);
     media().ge.set_draw_sink(nullptr);
     media().ge.set_view_hook(nullptr);
     media().ge.set_transfer_sink(nullptr);
@@ -746,9 +786,13 @@ void register_ge(HleRegistrar &hle) {
     const auto enqueue = [](Runtime &rt, AllegrexContext &ctx) {
         const std::uint32_t id = media().next_ge_list++;
         GeList list{};
-        list.pc = arg(ctx, 0) & 0x0FFFFFFFu;
+        list.start = arg(ctx, 0) & 0x0FFFFFFFu;
+        list.pc = list.start;
         list.stall = arg(ctx, 1) & 0x0FFFFFFFu;
         list.callback = static_cast<std::int32_t>(arg(ctx, 2));
+        if (trace_ge_lists())
+            log_ge_list("start id=" + std::to_string(id) + " list=" + psprecomp::hex32(list.start) +
+                " stall=" + psprecomp::hex32(list.stall));
         media().ge_lists[id] = std::move(list);
         perf::count_display_list();
         run_ge_list(rt, id);
